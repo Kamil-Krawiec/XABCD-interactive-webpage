@@ -7,7 +7,129 @@ import numpy as np
 import pandas as pd
 
 
-def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='charts'):
+def plot_xabcd_pattern(pattern, ohlc, save_plots=False, save_dir='charts', candles_left=50, candles_right=50):
+    """
+    Plots a single XABCD pattern on an OHLC candlestick chart without Stop-Loss (SL) and Take-Profit (TP) levels.
+
+    Parameters:
+    - pattern (dict): Dictionary containing pattern details.
+    - ohlc (pd.DataFrame): OHLC DataFrame indexed by datetime.
+    - save_plots (bool): If True, saves the plot as a JPEG file in the specified directory.
+    - save_dir (str): Directory path to save the plot if save_plots is True.
+    - candles_left (int): Number of candles to display before the pattern starts.
+    - candles_right (int): Number of candles to display after the pattern ends.
+
+    Returns:
+    - matplotlib.figure.Figure: The generated plot figure.
+    """
+    # Create directory for saving plots if required
+    if save_plots and not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # Helper function to find the nearest index
+    def find_nearest_idx(dt_index, target_time):
+        """Find the index of the nearest timestamp to target_time in dt_index."""
+        dt_array = dt_index.to_numpy()
+        target_np = np.datetime64(target_time)
+        diff = np.abs(dt_array - target_np)
+        nearest_idx = diff.argmin()
+        return nearest_idx
+
+    # Extract pattern details
+    symbol = pattern['symbol']
+    interval = pattern['interval']
+    pattern_name = pattern['pattern_name']
+    pattern_type = pattern.get('pattern_type', '')
+    points = ['X', 'A', 'B', 'C', 'D']
+    point_times = [pd.to_datetime(pattern[f'{point}_time']) for point in points]
+    point_prices = [pattern[f'{point}_price'] for point in points]
+
+    # Define the window: from pattern_start_time - candles_left to D_time + candles_right
+    pattern_start_time = pd.to_datetime(pattern['pattern_start_time'])
+    D_time = pd.to_datetime(pattern['D_time'])
+
+    # Locate the start and end positions in the OHLC data
+    try:
+        pattern_start_idx = find_nearest_idx(ohlc.index, pattern_start_time)
+    except Exception as e:
+        print(f"Error finding pattern_start_time: {e}")
+        return None
+    try:
+        D_idx = find_nearest_idx(ohlc.index, D_time)
+    except Exception as e:
+        print(f"Error finding D_time: {e}")
+        return None
+
+    # Calculate start and end indices with bounds checking
+    start_idx = max(pattern_start_idx - candles_left, 0)
+    end_idx = min(D_idx + candles_right, len(ohlc) - 1)
+
+    # Slice the data to focus on the relevant range
+    data_segment = ohlc.iloc[start_idx:end_idx + 1].copy()
+    data_segment.sort_index(inplace=True)  # Ensure sorted by time
+
+    # Prepare data for mplfinance
+    data_for_plot = data_segment.copy()
+
+    # Create the figure and axis using mplfinance
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    # Plot the candlestick chart
+    try:
+        mpf.plot(data_for_plot, type='candle', ax=ax, style='charles', show_nontrading=True,
+                 volume=False)
+    except Exception as e:
+        print(f"Error plotting candlestick: {e}")
+        plt.close(fig)
+        return None
+
+    # Overlay the XABCD pattern
+    try:
+        ax.plot(point_times, point_prices, marker='o', linestyle='-', color='r', label='XABCD Pattern')
+    except Exception as e:
+        print(f"Error plotting XABCD pattern: {e}")
+
+    # Annotate the points
+    try:
+        colors = ['r', 'g', 'b', 'm', 'y']
+        for point, time, price, color in zip(points, point_times, point_prices, colors):
+            ax.annotate(point, xy=(time, price), xytext=(0, 10),
+                        textcoords='offset points', color=color, fontsize=12, weight='bold',
+                        horizontalalignment='center')
+    except Exception as e:
+        print(f"Error annotating points: {e}")
+
+    # Set the title
+    plt.title(f"XABCD Pattern {pattern_name} for {symbol} ({interval})")
+
+    # Format the dates to make them more readable
+    try:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.xticks(rotation=45)  # Rotate X-axis labels for better visibility
+        # Optionally, set the frequency of date ticks
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        # Adjust tick parameters for better visibility
+        ax.tick_params(axis='x', which='major', labelsize=10)
+    except Exception as e:
+        print(f"Error formatting date axis: {e}")
+
+    # Tight layout for better spacing
+    plt.tight_layout()
+
+    # Save the plot if requested
+    if save_plots:
+        try:
+            filename = f"XABCD_{pattern_name}_{symbol}_{interval}.jpg"
+            filepath = os.path.join(save_dir, filename)
+            plt.savefig(filepath, format='jpg')
+            print(f"Saved plot to {filepath}")
+        except Exception as e:
+            print(f"Error saving plot: {e}")
+
+    # Return the figure without showing it
+    return fig
+
+def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='charts', candles_left=50, candles_right=50):
     """
     Plots a single ABCD pattern with Stop-Loss (SL) and Take-Profit (TP) levels on an OHLC candlestick chart.
 
@@ -44,8 +166,7 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     point_prices = [pattern[f'{point}_price'] for point in points]
 
     # Define the window: from pattern_start_time - candles_left to D_time + candles_right
-    candles_left = 10
-    candles_right = 10
+
     pattern_start_time = pd.to_datetime(pattern['pattern_start_time'])
     D_time = pd.to_datetime(pattern['D_time'])
 
