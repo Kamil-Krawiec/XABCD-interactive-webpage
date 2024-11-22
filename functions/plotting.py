@@ -1,3 +1,4 @@
+
 import os
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -11,7 +12,7 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     Plots a single ABCD pattern with Stop-Loss (SL) and Take-Profit (TP) levels on an OHLC candlestick chart.
 
     Parameters:
-    - pattern (pd.Series or dict): Series or dictionary containing pattern details.
+    - pattern (dict): Dictionary containing pattern details.
     - ohlc (pd.DataFrame): OHLC DataFrame indexed by datetime.
     - save_plots (bool): If True, saves the plot as a JPEG file in the specified directory.
     - save_dir (str): Directory path to save the plot if save_plots is True.
@@ -77,7 +78,7 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     # Plot the candlestick chart
     try:
         mpf.plot(data_for_plot, type='candle', ax=ax, style='charles', show_nontrading=True,
-                 axtitle=f"{symbol} - {interval} ABCD Pattern: {pattern_name}")
+                 axtitle=f"{symbol} - {interval} ABCD Pattern: {pattern_name}", volume=False)
     except Exception as e:
         print(f"Error plotting candlestick: {e}")
         plt.close(fig)
@@ -118,7 +119,7 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
         try:
             ax.axhline(y=take_profit_level, color='green', linestyle='--', label='Take Profit')
             if entry_time:
-                ax.text(entry_time, take_profit_level, 'TP', color='green', fontsize=12, weight='bold',
+                ax.text(take_profit_level, entry_time, 'TP', color='green', fontsize=12, weight='bold',
                         verticalalignment='top')
         except Exception as e:
             print(f"Error plotting Take Profit: {e}")
@@ -215,11 +216,12 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     # Save the plot if requested
     if save_plots:
         try:
-            filename = f"XABCD_{pattern_name}_{idx + 1}_SL_TP.jpg"
+            filename = f"XABCD_{pattern_name}_{symbol}_{interval}.jpg"
             filepath = os.path.join(save_dir, filename)
             plt.savefig(filepath, format='jpg')
             print(f"Saved plot to {filepath}")
         except Exception as e:
             print(f"Error saving plot: {e}")
 
+    # Return the figure without showing it
     return fig

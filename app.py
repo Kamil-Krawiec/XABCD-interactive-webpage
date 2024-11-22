@@ -1,8 +1,9 @@
+# app.py
 
 import os
 import pandas as pd
 import streamlit as st
-import plotly.express as px
+import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 
 from classes.pattern_manager_class import PatternManager
@@ -32,6 +33,7 @@ deltas = {
     '1d': 0.1,
     '1w': 0.1,
 }
+
 
 # Function to process data
 def process_symbol_interval(symbol, interval, start_date):
@@ -97,6 +99,58 @@ def process_symbol_interval(symbol, interval, start_date):
         st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
 
+
+# Function to create Candlestick chart with overlaid patterns
+def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected):
+    client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+    # Fetch the latest data to cover all patterns
+    latest_pattern_start_time = pd.to_datetime(filtered_df['pattern_start_time']).max()
+    start_date_plot = latest_pattern_start_time.strftime('%Y-%m-%d')
+    historic_data = get_historical_data(client, symbol_selected, interval_selected, start_date_plot)
+    if historic_data is None or historic_data.empty:
+        st.error("Failed to retrieve OHLC data for plotting.")
+        return
+
+    # Ensure 'open_time' is datetime and set as index
+    historic_data['open_time'] = pd.to_datetime(historic_data['open_time'])
+    historic_data.set_index('open_time', inplace=True)
+
+    fig = go.Figure()
+
+    # Add candlestick trace
+    fig.add_trace(go.Candlestick(
+        x=historic_data.index,
+        open=historic_data['open'],
+        high=historic_data['high'],
+        low=historic_data['low'],
+        close=historic_data['close'],
+        name='Candlestick'
+    ))
+
+    # Add each pattern
+    for idx, pattern in filtered_df.iterrows():
+        points = ['X', 'A', 'B', 'C', 'D']
+        x_times = [pattern[f'{point}_time'] for point in points]
+        y_prices = [pattern[f'{point}_price'] for point in points]
+        fig.add_trace(go.Scatter(
+            x=x_times,
+            y=y_prices,
+            mode='lines+markers',
+            name=f"Pattern {idx + 1}",
+            marker=dict(size=8),
+            line=dict(width=2)
+        ))
+
+    fig.update_layout(
+        title=f"XABCD Patterns for {symbol_selected} on {interval_selected} Interval",
+        xaxis_title="Time",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
 # Streamlit App
 def main():
     st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
@@ -109,14 +163,14 @@ def main():
     symbols = st.sidebar.multiselect(
         "Select Symbols",
         ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ETHBTC", "SOLUSDT"],
-        default=["BTCUSDT", "ETHUSDT"]
+        default=["BTCUSDT"]
     )
 
     # User selects intervals
     intervals = st.sidebar.multiselect(
         "Select Intervals",
         ["1w", "1d", "4h", "1h", "30m"],
-        default=["1d", "4h"]
+        default=["1d"]
     )
 
     # User selects start date
@@ -147,7 +201,7 @@ def main():
             st.success(f"Data saved to `{csv_output_path}`")
             st.dataframe(all_patterns_df)
 
-            # Visualization: Scatter Plot of Patterns
+            # Visualization: Candlestick Chart with Patterns
             st.header("XABCD Patterns Visualization")
             symbol_selected = st.selectbox("Select Symbol for Visualization", all_patterns_df['symbol'].unique())
             interval_selected = st.selectbox("Select Interval for Visualization", all_patterns_df['interval'].unique())
@@ -155,34 +209,32 @@ def main():
             filtered_df = all_patterns_df[
                 (all_patterns_df['symbol'] == symbol_selected) &
                 (all_patterns_df['interval'] == interval_selected)
-            ]
+                ]
 
             if not filtered_df.empty:
-                fig = px.scatter(
-                    filtered_df,
-                    x='X_time',
-                    y='X_price',
-                    title=f"XABCD Patterns for {symbol_selected} on {interval_selected} Interval",
-                    hover_data=['pattern_name', 'ratio_AB_XA', 'ratio_BC_AB', 'ratio_CD_BC', 'ratio_AD_XA']
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected)
 
                 # Detailed View: Select a Pattern to View
                 st.header("Detailed Pattern View")
+
+                # Create options for selectbox
                 pattern_options = [
                     f"Pattern {i + 1}: {row['pattern_name']} on {row['X_time']}"
                     for i, row in filtered_df.iterrows()
                 ]
-                pattern_indices = filtered_df.index.tolist()
-                selected_index = st.selectbox(
+
+                selected_option = st.selectbox(
                     "Select a Pattern to View",
-                    options=pattern_indices,
-                    format_func=lambda x: f"Pattern {filtered_df.index.get_loc(x) + 1}: {filtered_df.at[x, 'pattern_name']} on {filtered_df.at[x, 'X_time']}"
+                    options=pattern_options
                 )
+
+                # Map the selected option back to the dataframe index
+                selected_index = pattern_options.index(selected_option)
 
                 if st.button("View Selected Pattern"):
                     try:
-                        pattern = filtered_df.loc[selected_index].to_dict()
+                        # Retrieve the selected pattern using .iloc
+                        pattern = filtered_df.iloc[selected_index].to_dict()
 
                         # Fetch the corresponding OHLC data
                         client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
@@ -213,6 +265,7 @@ def main():
                 st.warning("No data available for the selected symbol and interval.")
         else:
             st.error("No patterns were found for the selected configuration.")
+
 
 if __name__ == "__main__":
     main()
