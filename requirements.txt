@@ -1,0 +1,20 @@
+# Core Libraries
+pandas==2.1.0
+numpy==1.24.3
+
+# Web Framework
+streamlit==1.25.0
+
+# Visualization
+matplotlib==3.7.2
+mplfinance
+plotly==5.15.0
+ta
+
+# APIs and Requests
+requests==2.31.0
+python-binance==1.0.19
+python-dotenv==1.0.0
+
+# Data Classes and Utilities
+dataclasses==0.6
