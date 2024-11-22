@@ -1,11 +1,14 @@
+
 import os
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import matplotlib.pyplot as plt
 
 from classes.pattern_manager_class import PatternManager
 from functions.binance_api import get_historical_data
 from functions.extremas import get_extremes
+from functions.plotting import plot_xabcd_patterns_with_sl_tp
 from binance.client import Client
 
 from dotenv import load_dotenv
@@ -30,22 +33,22 @@ deltas = {
     '1w': 0.1,
 }
 
-# Function to process data (as defined in your main script)
+# Function to process data
 def process_symbol_interval(symbol, interval, start_date):
     try:
-        # Initialize Binance client inside the process to avoid issues with multiprocessing
+        # Initialize Binance client
         client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
-        print(f"Processing {symbol} on {interval} interval from {start_date}")
+        st.write(f"Processing {symbol} on {interval} interval from {start_date}")
 
         # Step 1: Get historical data
         historic_data = get_historical_data(client, symbol, interval, start_date)
 
         # Check if historical data is available
         if historic_data is None or historic_data.empty:
-            print(f"No historical data for {symbol} on {interval}. Skipping.")
+            st.warning(f"No historical data for {symbol} on {interval}. Skipping.")
             return None
         else:
-            print(f"Fetched {len(historic_data)} rows of historical data for {symbol} on {interval}.")
+            st.write(f"Fetched {len(historic_data)} rows of historical data for {symbol} on {interval}.")
 
         # Adjust threshold based on interval
         threshold = thresholds.get(interval, 0.04)  # Default to 0.04 if interval not in thresholds
@@ -55,10 +58,10 @@ def process_symbol_interval(symbol, interval, start_date):
 
         # Check if extremes are found
         if extremes is None or extremes.empty:
-            print(f"No extremes found for {symbol} on {interval}. Skipping.")
+            st.warning(f"No extremes found for {symbol} on {interval}. Skipping.")
             return None
         else:
-            print(f"Found {len(extremes)} extremes for {symbol} on {interval}.")
+            st.write(f"Found {len(extremes)} extremes for {symbol} on {interval}.")
 
         # Adjust delta based on interval
         delta = deltas.get(interval, 0.4)  # Default to 0.4 if interval not in deltas
@@ -76,10 +79,10 @@ def process_symbol_interval(symbol, interval, start_date):
 
         # Check if patterns are found
         if not pm.pattern_list:
-            print(f"No patterns found for {symbol} on {interval}.")
+            st.info(f"No patterns found for {symbol} on {interval}.")
             return None
         else:
-            print(f"Found {len(pm.pattern_list)} patterns for {symbol} on {interval}.")
+            st.write(f"Found {len(pm.pattern_list)} patterns for {symbol} on {interval}.")
 
         # Convert patterns to DataFrame
         pm.patterns_to_dataframe()
@@ -91,11 +94,12 @@ def process_symbol_interval(symbol, interval, start_date):
         return pm.pattern_df
 
     except Exception as e:
-        print(f"Error processing {symbol} on {interval}: {e}")
+        st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
 
 # Streamlit App
 def main():
+    st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
     st.title("Cryptocurrency XABCD Pattern Analyzer")
 
     # Sidebar for user inputs
@@ -105,12 +109,14 @@ def main():
     symbols = st.sidebar.multiselect(
         "Select Symbols",
         ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ETHBTC", "SOLUSDT"],
+        default=["BTCUSDT", "ETHUSDT"]
     )
 
     # User selects intervals
     intervals = st.sidebar.multiselect(
         "Select Intervals",
         ["1w", "1d", "4h", "1h", "30m"],
+        default=["1d", "4h"]
     )
 
     # User selects start date
@@ -123,7 +129,7 @@ def main():
     if st.sidebar.button("Fetch and Analyze"):
         if not symbols or not intervals:
             st.error("Please select at least one symbol and one interval.")
-            return
+            st.stop()
 
         csv_output_path = "data/crypto_patterns.csv"
         all_patterns_df = pd.DataFrame()
@@ -138,25 +144,71 @@ def main():
         if not all_patterns_df.empty:
             # Save the master DataFrame to CSV
             all_patterns_df.to_csv(csv_output_path, index=False)
-            st.success(f"Data saved to {csv_output_path}")
+            st.success(f"Data saved to `{csv_output_path}`")
             st.dataframe(all_patterns_df)
 
-            # Visualization
+            # Visualization: Scatter Plot of Patterns
             st.header("XABCD Patterns Visualization")
             symbol_selected = st.selectbox("Select Symbol for Visualization", all_patterns_df['symbol'].unique())
             interval_selected = st.selectbox("Select Interval for Visualization", all_patterns_df['interval'].unique())
 
-            filtered_df = all_patterns_df[(all_patterns_df['symbol'] == symbol_selected) &
-                                          (all_patterns_df['interval'] == interval_selected)]
+            filtered_df = all_patterns_df[
+                (all_patterns_df['symbol'] == symbol_selected) &
+                (all_patterns_df['interval'] == interval_selected)
+            ]
+
             if not filtered_df.empty:
                 fig = px.scatter(
                     filtered_df,
-                    x='X_time',  # Ensure these columns exist in your DataFrame
-                    y='X_price',  # Adjust based on your DataFrame
+                    x='X_time',
+                    y='X_price',
                     title=f"XABCD Patterns for {symbol_selected} on {interval_selected} Interval",
                     hover_data=['pattern_name', 'ratio_AB_XA', 'ratio_BC_AB', 'ratio_CD_BC', 'ratio_AD_XA']
                 )
-                st.plotly_chart(fig)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Detailed View: Select a Pattern to View
+                st.header("Detailed Pattern View")
+                pattern_options = [
+                    f"Pattern {i + 1}: {row['pattern_name']} on {row['X_time']}"
+                    for i, row in filtered_df.iterrows()
+                ]
+                pattern_indices = filtered_df.index.tolist()
+                selected_index = st.selectbox(
+                    "Select a Pattern to View",
+                    options=pattern_indices,
+                    format_func=lambda x: f"Pattern {filtered_df.index.get_loc(x) + 1}: {filtered_df.at[x, 'pattern_name']} on {filtered_df.at[x, 'X_time']}"
+                )
+
+                if st.button("View Selected Pattern"):
+                    try:
+                        pattern = filtered_df.loc[selected_index].to_dict()
+
+                        # Fetch the corresponding OHLC data
+                        client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+                        symbol = pattern['symbol']
+                        interval = pattern['interval']
+                        pattern_start_time = pattern['pattern_start_time']
+                        start_date_plot = pattern_start_time.split(' ')[0]  # Extract date part
+
+                        historic_data = get_historical_data(client, symbol, interval, start_date_plot)
+                        if historic_data is None or historic_data.empty:
+                            st.error("Failed to retrieve OHLC data for plotting.")
+                            st.stop()
+
+                        # Ensure 'open_time' is datetime and set as index
+                        historic_data['open_time'] = pd.to_datetime(historic_data['open_time'])
+                        historic_data.set_index('open_time', inplace=True)
+
+                        # Plot the pattern
+                        fig_plot = plot_xabcd_patterns_with_sl_tp(
+                            pattern=pattern,
+                            ohlc=historic_data,
+                            save_plots=False
+                        )
+                        st.pyplot(fig_plot)
+                    except Exception as e:
+                        st.error(f"Error viewing selected pattern: {e}")
             else:
                 st.warning("No data available for the selected symbol and interval.")
         else:
