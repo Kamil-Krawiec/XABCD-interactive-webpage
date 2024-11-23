@@ -420,11 +420,14 @@ def main():
                 # Visualization of Trades
                 st.subheader("Visualize Trades with SL and TP Levels")
 
-                if not user_results.empty:
+                # Filter user_results to only include trades with existing SL and TP
+                user_results_with_sl_tp = trade_analysis_results.dropna(subset=['SL', 'TP'])
+
+                if not user_results_with_sl_tp.empty:
                     # Select a trade to visualize
                     trade_options = [
                         f"Trade {i + 1}: {row['symbol']} on {row['D_time']} ({'Profit' if row['profit'] > 0 else 'Loss'})"
-                        for i, row in trade_analysis_results.reset_index().iterrows()
+                        for i, row in user_results_with_sl_tp.reset_index().iterrows()
                     ]
 
                     # Define a form to prevent page jumps when selecting trades
@@ -438,7 +441,7 @@ def main():
 
                     if visualize_trade_button:
                         selected_trade_index = trade_options.index(selected_trade_option)
-                        selected_trade = trade_analysis_results.reset_index().iloc[selected_trade_index]
+                        selected_trade = user_results_with_sl_tp.reset_index().iloc[selected_trade_index]
 
                         # Use stored OHLC data
                         symbol = selected_trade['symbol']
@@ -459,12 +462,10 @@ def main():
                         candles_left = 2
                         candles_right = INTERVAL_PARAMETERS[interval][5] + 1
 
-                        print(selected_trade)
                         # Plot the trade using your plotting function
                         fig = plot_xabcd_patterns_with_sl_tp(
                             pattern=selected_trade,
                             ohlc=ohlc_data,
-                            save_plots=False,
                             candles_left=candles_left,
                             candles_right=candles_right
                         )
@@ -474,7 +475,7 @@ def main():
                         else:
                             st.error("Failed to generate the plot for the selected trade.")
                 else:
-                    st.warning("No trades to display based on the selected filters.")
+                    st.warning("No trades with SL and TP available for visualization.")
             else:
                 st.warning("Please perform trade analysis to view results.")
         else:

@@ -94,7 +94,7 @@ def plot_xabcd_pattern(pattern, ohlc, save_plots=False, save_dir='charts', candl
         for point, time, price, color in zip(points, point_times, point_prices, colors):
             ax.annotate(point, xy=(time, price), xytext=(0, 10),
                         textcoords='offset points', color=color, fontsize=12, weight='bold',
-                        horizontalalignment='center')
+                        horizontalalignment='center', transform=ax.transAxes)
     except Exception as e:
         print(f"Error annotating points: {e}")
 
@@ -162,21 +162,29 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     point_times = [pd.to_datetime(pattern[f'{point}_time']) for point in points]
     point_prices = [pattern[f'{point}_price'] for point in points]
 
-    # Define the window: from pattern_start_time - candles_left to D_time + candles_right
+    # Ensure 'ohlc' index is sorted and in datetime format
+    ohlc = ohlc.sort_index()
+    if not isinstance(ohlc.index, pd.DatetimeIndex):
+        ohlc.index = pd.to_datetime(ohlc.index)
 
+    # Extract pattern times and check if they are within ohlc index range
     pattern_start_time = pd.to_datetime(pattern['pattern_start_time'])
     D_time = pd.to_datetime(pattern['D_time'])
+
+    if pattern_start_time < ohlc.index.min() or D_time > ohlc.index.max():
+        print("Pattern times are outside the OHLC data range.")
+        return None
 
     # Locate the start and end positions in the OHLC data
     try:
         pattern_start_idx = find_nearest_idx(ohlc.index, pattern_start_time)
     except Exception as e:
-        print(f"Error finding pattern_start_time: {e}")
+        print(f"Error finding pattern_start_time index: {e}")
         return None
     try:
         D_idx = find_nearest_idx(ohlc.index, D_time)
     except Exception as e:
-        print(f"Error finding D_time: {e}")
+        print(f"Error finding D_time index: {e}")
         return None
 
     # Calculate start and end indices with bounds checking
@@ -186,6 +194,12 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     # Slice the data to focus on the relevant range
     data_segment = ohlc.iloc[start_idx:end_idx + 1].copy()
     data_segment.sort_index(inplace=True)  # Ensure sorted by time
+
+    # Limit data segment size
+    MAX_DATA_POINTS = 1000  # Adjust as needed
+    if len(data_segment) > MAX_DATA_POINTS:
+        data_segment = data_segment.iloc[-MAX_DATA_POINTS:]
+        print(f"Data segment truncated to last {MAX_DATA_POINTS} data points.")
 
     # Prepare data for mplfinance
     data_for_plot = data_segment.copy()
@@ -208,12 +222,12 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     except Exception as e:
         print(f"Error plotting ABCD pattern: {e}")
 
-    # Annotate the points
+    # Annotate the points (Removed transform=ax.transAxes)
     try:
         colors = ['r', 'g', 'b', 'm', 'y']
         for point, time, price, color in zip(points, point_times, point_prices, colors):
-            ax.annotate(point, xy=(time, price), xytext=(time, price),
-                        textcoords='offset points', color=color, fontsize=12, weight='bold')
+            ax.annotate(point, xy=(time, price), xytext=(5, 5), textcoords='offset points',
+                        color=color, fontsize=12, weight='bold')
     except Exception as e:
         print(f"Error annotating points: {e}")
 
@@ -222,10 +236,6 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     take_profit_level = pattern.get('TP', None)
     entry_price = pattern.get('entry_price', None)
     entry_time = pd.to_datetime(pattern['entry_time']) if pd.notna(pattern.get('entry_time')) else None
-
-    print(stop_loss_level)
-    print(take_profit_level)
-
 
     # Ensure the values are finite before plotting them
     if pd.notna(stop_loss_level) and np.isfinite(stop_loss_level):
@@ -241,7 +251,7 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
         try:
             ax.axhline(y=take_profit_level, color='green', linestyle='--', label='Take Profit')
             if entry_time:
-                ax.text(take_profit_level, entry_time, 'TP', color='green', fontsize=12, weight='bold',
+                ax.text(entry_time, take_profit_level, 'TP', color='green', fontsize=12, weight='bold',
                         verticalalignment='top')
         except Exception as e:
             print(f"Error plotting Take Profit: {e}")
@@ -252,20 +262,19 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
             if entry_time:
                 # Draw a more noticeable arrow to indicate the entry point
                 ax.annotate(
-                    '',
-                    xy=(entry_time, entry_price + (data_segment['high'].max() - data_segment['low'].min()) * 0.02),
-                    xytext=(entry_time, entry_price),
+                    'Entry',
+                    xy=(entry_time, entry_price),
+                    xytext=(entry_time, entry_price + (data_segment['high'].max() - data_segment['low'].min()) * 0.05),
                     arrowprops=dict(
                         arrowstyle='->',
                         color='orange',
-                        lw=3.5,
+                        lw=2,
                         connectionstyle='arc3,rad=0.2',
-                        shrinkA=0,
-                        shrinkB=5,
                     ),
+                    color='orange',
+                    fontsize=12,
+                    weight='bold'
                 )
-                ax.text(entry_time, entry_price, 'Entry', color='orange', fontsize=12, weight='bold',
-                        verticalalignment='bottom')
         except Exception as e:
             print(f"Error plotting Entry Price: {e}")
 
@@ -293,6 +302,7 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
             f"CD/BC Ratio: {ratio_CD_BC:.2f}" if pd.notna(ratio_CD_BC) else "CD/BC Ratio: N/A",
             f"AD/XA Ratio: {ratio_AD_XA:.2f}" if pd.notna(ratio_AD_XA) else "AD/XA Ratio: N/A",
             result_text,
+            f"Exit reason: {pattern.get('exit_reason', 'N/A')}"
         )
     )
 
