@@ -9,32 +9,31 @@ import matplotlib.pyplot as plt
 from classes.pattern_manager_class import PatternManager
 from functions.binance_api import get_historical_data
 from functions.extremas import get_extremes
-from functions.plotting import plot_xabcd_patterns_with_sl_tp,plot_xabcd_pattern
+from functions.plotting import plot_xabcd_patterns_with_sl_tp, plot_xabcd_pattern
 from binance.client import Client
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Define thresholds and deltas for each interval
-thresholds = {
+# Default thresholds and deltas
+DEFAULT_THRESHOLDS = {
     '30m': 0.01,
     '1h': 0.012,
-    '4h': 0.02,
-    '1d': 0.03,
-    '1w': 0.04,
+    '4h': 0.020,
+    '1d': 0.030,
+    '1w': 0.040,
 }
 
-deltas = {
-    '30m': 0.1,
-    '1h': 0.13,
-    '4h': 0.18,
-    '1d': 0.1,
-    '1w': 0.1,
+DEFAULT_DELTAS = {
+    '30m': 0.100,
+    '1h': 0.130,
+    '4h': 0.180,
+    '1d': 0.10,
+    '1w': 0.10,
 }
 
-
-def process_symbol_interval(symbol, interval, start_date):
+def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     """
     Processes a given symbol and interval to find XABCD patterns.
 
@@ -42,6 +41,8 @@ def process_symbol_interval(symbol, interval, start_date):
     - symbol (str): Cryptocurrency symbol (e.g., 'BTCUSDT').
     - interval (str): Time interval (e.g., '1d', '4h').
     - start_date (str): Start date for historical data in 'YYYY-MM-DD' format.
+    - threshold (float): Threshold value for extreme point detection.
+    - delta (float): Delta value for pattern detection.
 
     Returns:
     - pd.DataFrame or None: DataFrame containing detected patterns or None if no patterns found.
@@ -61,9 +62,6 @@ def process_symbol_interval(symbol, interval, start_date):
         else:
             st.write(f"Fetched {len(historic_data)} rows of historical data for {symbol} on {interval}.")
 
-        # Adjust threshold based on interval
-        threshold = thresholds.get(interval, 0.04)  # Default to 0.04 if interval not in thresholds
-
         # Step 2: Detect extreme points
         extremes = get_extremes(historic_data, threshold)
 
@@ -73,9 +71,6 @@ def process_symbol_interval(symbol, interval, start_date):
             return None
         else:
             st.write(f"Found {len(extremes)} extremes for {symbol} on {interval}.")
-
-        # Adjust delta based on interval
-        delta = deltas.get(interval, 0.4)  # Default to 0.4 if interval not in deltas
 
         # Step 3: Initialize PatternManager
         pm = PatternManager(
@@ -107,7 +102,6 @@ def process_symbol_interval(symbol, interval, start_date):
     except Exception as e:
         st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
-
 
 def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected):
     """
@@ -191,6 +185,17 @@ def main():
         default=["1d"]
     )
 
+    # Let users input thresholds and deltas
+    thresholds = {}
+    deltas = {}
+    for interval in intervals:
+        default_threshold = DEFAULT_THRESHOLDS.get(interval, 0.04)
+        default_delta = DEFAULT_DELTAS.get(interval, 0.10)
+        thresholds[interval] = st.sidebar.number_input(
+            f"Price percent change for extremes {interval}", min_value=0.000, max_value=1.000, value=default_threshold, step=0.001, format="%.3f")
+        deltas[interval] = st.sidebar.number_input(
+            f"Formation error allowed for {interval}", min_value=0.000, max_value=1.000, value=default_delta, step=0.001, format="%.3f")
+
     # User selects start date
     start_date = st.sidebar.date_input(
         "Start Date",
@@ -209,7 +214,7 @@ def main():
         with st.spinner("Collecting and processing data..."):
             for interval in intervals:
                 for symbol in symbols:
-                    df = process_symbol_interval(symbol, interval, start_date)
+                    df = process_symbol_interval(symbol, interval, start_date, thresholds[interval], deltas[interval])
                     if df is not None and not df.empty:
                         all_patterns_df = pd.concat([all_patterns_df, df], ignore_index=True)
 
@@ -275,6 +280,9 @@ def main():
                 candles_left = st.number_input("Candles to display before the pattern (Left)", min_value=1, max_value=100, value=10)
                 candles_right = st.number_input("Candles to display after the pattern (Right)", min_value=1, max_value=100, value=10)
 
+                # Create a placeholder for the plot
+                plot_placeholder = st.empty()
+
                 # Define a function to display the selected pattern
                 def display_selected_pattern():
                     try:
@@ -317,7 +325,7 @@ def main():
                             candles_right=candles_right,
                             save_plots=False
                         )
-                        st.pyplot(fig_plot)
+                        plot_placeholder.pyplot(fig_plot)
                     except Exception as e:
                         st.error(f"Error viewing selected pattern: {e}")
 
