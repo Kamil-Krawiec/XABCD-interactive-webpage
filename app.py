@@ -4,34 +4,18 @@ import os
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
 
+from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS
 from classes.pattern_manager_class import PatternManager
 from functions.binance_api import get_historical_data
 from functions.extremas import get_extremes
-from functions.plotting import plot_xabcd_patterns_with_sl_tp, plot_xabcd_pattern
+from functions.plotting import plot_xabcd_pattern
 from binance.client import Client
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Default thresholds and deltas
-DEFAULT_THRESHOLDS = {
-    '30m': 0.01,
-    '1h': 0.012,
-    '4h': 0.020,
-    '1d': 0.030,
-    '1w': 0.040,
-}
-
-DEFAULT_DELTAS = {
-    '30m': 0.100,
-    '1h': 0.130,
-    '4h': 0.180,
-    '1d': 0.10,
-    '1w': 0.10,
-}
 
 def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     """
@@ -103,6 +87,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
 
+
 def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected):
     """
     Creates and displays a Plotly Candlestick chart with overlaid XABCD patterns.
@@ -113,9 +98,9 @@ def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_sele
     - interval_selected (str): Selected time interval.
     """
     client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
-    # Fetch the latest data to cover all patterns
-    latest_pattern_start_time = pd.to_datetime(filtered_df['pattern_start_time']).max()
-    start_date_plot = latest_pattern_start_time.strftime('%Y-%m-%d')
+    # Fetch the earliest pattern start time to cover all patterns
+    earliest_pattern_start_time = pd.to_datetime(filtered_df['pattern_start_time']).min()
+    start_date_plot = earliest_pattern_start_time.strftime('%Y-%m-%d')
     historic_data = get_historical_data(client, symbol_selected, interval_selected, start_date_plot)
     if historic_data is None or historic_data.empty:
         st.error("Failed to retrieve OHLC data for plotting.")
@@ -164,11 +149,53 @@ def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_sele
 
     st.plotly_chart(fig, use_container_width=True)
 
+
+def plot_selected_pattern(pattern, candles_left, candles_right):
+    client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+    symbol = pattern['symbol']
+    interval = pattern['interval']
+    pattern_start_time = pattern['pattern_start_time']
+    D_time = pattern['D_time']
+
+    # Convert times to datetime
+    pattern_start_time_dt = pd.to_datetime(pattern_start_time)
+    D_time_dt = pd.to_datetime(D_time)
+
+    # Calculate the start and end dates for data fetching
+    unit_map = {'m': 'T', 'h': 'H', 'd': 'D', 'w': 'W'}
+    interval_value = int(interval[:-1])
+    interval_unit = unit_map.get(interval[-1], 'D')
+
+    start_date_plot = (pattern_start_time_dt - pd.Timedelta(candles_left * interval_value, unit=interval_unit))
+    end_date_plot = (D_time_dt + pd.Timedelta(candles_right * interval_value, unit=interval_unit))
+
+    historic_data = get_historical_data(client, symbol, interval, start_date_plot.strftime('%Y-%m-%d'),
+                                        end_date_plot.strftime('%Y-%m-%d'))
+    if historic_data is None or historic_data.empty:
+        st.error("Failed to retrieve OHLC data for plotting.")
+        st.stop()
+
+    # Ensure 'open_time' is datetime and set as index
+    historic_data['open_time'] = pd.to_datetime(historic_data['open_time'])
+    historic_data.set_index('open_time', inplace=True)
+
+    # Plot the pattern
+    fig_plot = plot_xabcd_pattern(
+        pattern=pattern,
+        ohlc=historic_data,
+        candles_left=candles_left,
+        candles_right=candles_right,
+        save_plots=False
+    )
+
+    return fig_plot
+
+
 def main():
     st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
     st.title("Cryptocurrency XABCD Pattern Analyzer")
 
-    # Sidebar for user inputs
+    # --- Sidebar Configuration ---
     st.sidebar.header("Configuration")
 
     # User selects symbols
@@ -190,11 +217,17 @@ def main():
     deltas = {}
     for interval in intervals:
         default_threshold = DEFAULT_THRESHOLDS.get(interval, 0.04)
-        default_delta = DEFAULT_DELTAS.get(interval, 0.10)
+        default_delta = DEFAULT_DELTAS.get(interval, 0.1)
         thresholds[interval] = st.sidebar.number_input(
-            f"Price percent change for extremes {interval}", min_value=0.000, max_value=1.000, value=default_threshold, step=0.001, format="%.3f")
+            f"Price percent change for extremes {interval}",
+            min_value=0.000, max_value=1.000,
+            value=default_threshold, step=0.001, format="%.3f"
+        )
         deltas[interval] = st.sidebar.number_input(
-            f"Formation error allowed for {interval}", min_value=0.000, max_value=1.000, value=default_delta, step=0.001, format="%.3f")
+            f"Formation error allowed for {interval}",
+            min_value=0.000, max_value=1.000,
+            value=default_delta, step=0.001, format="%.3f"
+        )
 
     # User selects start date
     start_date = st.sidebar.date_input(
@@ -222,19 +255,18 @@ def main():
             # Save the master DataFrame to CSV
             all_patterns_df.to_csv(csv_output_path, index=False)
             st.success(f"Data saved to `{csv_output_path}`")
-            st.dataframe(all_patterns_df)
-
-            # Store the DataFrame in session state
             st.session_state['all_patterns_df'] = all_patterns_df
         else:
             st.error("No patterns were found for the selected configuration.")
 
-    # Check if 'all_patterns_df' is in session state
+    # --- Main Content ---
     if 'all_patterns_df' in st.session_state:
         all_patterns_df = st.session_state['all_patterns_df']
 
-        # Visualization: Candlestick Chart with Patterns
-        st.header("XABCD Patterns Visualization")
+        # --- Part 1: Overall Patterns ---
+        st.header("Overall Patterns")
+
+        # User selects a symbol and interval for visualization
         symbol_selected = st.selectbox(
             "Select Symbol for Visualization",
             all_patterns_df['symbol'].unique(),
@@ -246,99 +278,73 @@ def main():
             key='interval_select'
         )
 
-        def update_visualization():
-            filtered_df = all_patterns_df[
-                (all_patterns_df['symbol'] == symbol_selected) &
-                (all_patterns_df['interval'] == interval_selected)
+        # Filter patterns for selected symbol and interval
+        filtered_df = all_patterns_df[
+            (all_patterns_df['symbol'] == symbol_selected) &
+            (all_patterns_df['interval'] == interval_selected)
             ]
 
-            if not filtered_df.empty:
-                # Create Candlestick chart with overlaid patterns
-                create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected)
+        if not filtered_df.empty:
+            # Display the overall patterns DataFrame
+            st.dataframe(filtered_df)
 
-                # Detailed View: Select a Pattern to View
-                st.header("Detailed Pattern View")
+            # Visualize all patterns on candlestick chart
+            create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected)
+        else:
+            st.warning("No patterns available for the selected symbol and interval.")
 
-                # Reset dataframe index to ensure it starts from 0 and is sequential
-                filtered_df.reset_index(drop=True, inplace=True)
+        # --- Part 2: Detailed View of Single Pattern ---
+        st.header("Detailed View of Single Pattern")
+
+        if not filtered_df.empty:
+            # Define a form to group the inputs and the button
+            with st.form(key='detailed_view_form'):
+                # List of patterns to select from
                 pattern_options = [
                     f"Pattern {i + 1}: {row['pattern_name']} on {row['X_time']}"
                     for i, row in filtered_df.iterrows()
                 ]
 
-                # Use st.selectbox with a key to store the selection in session_state
                 selected_option = st.selectbox(
                     "Select a Pattern to View",
                     options=pattern_options,
                     key='selected_pattern'
                 )
 
-                # Get the selected index from the session state
+                # Input fields for candles_left and candles_right
+                candles_left = st.number_input(
+                    "Candles to display before the pattern (Left)",
+                    min_value=1, max_value=100, value=10,
+                    key='candles_left'
+                )
+                candles_right = st.number_input(
+                    "Candles to display after the pattern (Right)",
+                    min_value=1, max_value=100, value=10,
+                    key='candles_right'
+                )
+
+                # Submit button for the form
+                submit_button = st.form_submit_button(label='View Selected Pattern')
+
+            # After form submission
+            if submit_button:
                 selected_index = pattern_options.index(selected_option)
+                try:
+                    # Retrieve the selected pattern
+                    pattern = filtered_df.iloc[selected_index].to_dict()
 
-                # Add input fields for candles_left and candles_right
-                candles_left = st.number_input("Candles to display before the pattern (Left)", min_value=1, max_value=100, value=10)
-                candles_right = st.number_input("Candles to display after the pattern (Right)", min_value=1, max_value=100, value=10)
+                    # Fetch the corresponding OHLC data and plot
+                    fig_plot = plot_selected_pattern(pattern, candles_left, candles_right)
 
-                # Create a placeholder for the plot
-                plot_placeholder = st.empty()
-
-                # Define a function to display the selected pattern
-                def display_selected_pattern():
-                    try:
-                        # Retrieve the selected pattern using .iloc
-                        pattern = filtered_df.iloc[selected_index].to_dict()
-
-                        # Fetch the corresponding OHLC data with adjusted window
-                        client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
-                        symbol = pattern['symbol']
-                        interval = pattern['interval']
-                        pattern_start_time = pattern['pattern_start_time']
-                        D_time = pattern['D_time']  # Assuming D_time is the end of the pattern
-
-                        # Convert times to datetime
-                        pattern_start_time_dt = pd.to_datetime(pattern_start_time)
-                        D_time_dt = pd.to_datetime(D_time)
-
-                        # Calculate the start and end dates for data fetching
-                        unit_map = {'m': 'T', 'h': 'H', 'd': 'D', 'w': 'W'}
-                        interval_value = int(interval[:-1])
-                        interval_unit = unit_map.get(interval[-1], 'D')
-
-                        start_date_plot = (pattern_start_time_dt - pd.Timedelta(candles_left * interval_value, unit=interval_unit)).strftime('%Y-%m-%d')
-                        end_date_plot = (D_time_dt + pd.Timedelta(candles_right * interval_value, unit=interval_unit)).strftime('%Y-%m-%d')
-
-                        historic_data = get_historical_data(client, symbol, interval, start_date_plot, end_date_plot)
-                        if historic_data is None or historic_data.empty:
-                            st.error("Failed to retrieve OHLC data for plotting.")
-                            st.stop()
-
-                        # Ensure 'open_time' is datetime and set as index
-                        historic_data['open_time'] = pd.to_datetime(historic_data['open_time'])
-                        historic_data.set_index('open_time', inplace=True)
-
-                        # Plot the pattern
-                        fig_plot = plot_xabcd_pattern(
-                            pattern=pattern,
-                            ohlc=historic_data,
-                            candles_left=candles_left,
-                            candles_right=candles_right,
-                            save_plots=False
-                        )
-                        plot_placeholder.pyplot(fig_plot)
-                    except Exception as e:
-                        st.error(f"Error viewing selected pattern: {e}")
-
-                # Use st.button with on_click to ensure the callback has access to the current session state
-                st.button("View Selected Pattern", on_click=display_selected_pattern)
-
-            else:
-                st.warning("No data available for the selected symbol and interval.")
-
-        # Call the function to update visualization
-        update_visualization()
+                    # Display the plot
+                    st.pyplot(fig_plot)
+                except Exception as e:
+                    st.error(f"Error viewing selected pattern: {e}")
+        else:
+            st.warning("No patterns available for the selected symbol and interval.")
     else:
         st.info("Please fetch data to visualize patterns.")
+
 
 if __name__ == "__main__":
     main()
