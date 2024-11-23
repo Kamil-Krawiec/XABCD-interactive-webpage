@@ -13,3 +13,15 @@ DEFAULT_DELTAS = {
     '1d': 0.100,
     '1w': 0.100,
 }
+
+INTERVAL_PARAMETERS = {
+    # [atr_period, n_candles, cd_retrace, atr_multiplier, risk_reward, max_holding_period]
+    "1w": [6, 1, 0.216, 0.4573332, 2.98, 3],
+    "1d": [28, 2, 0.33, 1.54, 2.76, 13],
+    "4h": [9, 2, 0.349, 1.1, 2.764, 60],
+    "1h": [17, 29, 0.112, 1.303, 1.017, 28],
+    "30m": [13, 19, 0.282, 1.400, 1.330, 23],
+}
+
+INTERESTING_COLUMNS = ['symbol', 'interval', 'profit', 'exit_reason', 'pattern_name', 'pattern_type', 'entry_time',
+                       'SL', 'TP', 'Y', 'entry_price']

@@ -5,7 +5,8 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
-from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS
+from functions.trade_analysis import perform_trade_analysis
+from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS
 from classes.pattern_manager_class import PatternManager
 from functions.binance_api import get_historical_data
 from functions.extremas import get_extremes
@@ -253,8 +254,7 @@ def main():
 
         if not all_patterns_df.empty:
             # Save the master DataFrame to CSV
-            all_patterns_df.to_csv(csv_output_path, index=False)
-            st.success(f"Data saved to `{csv_output_path}`")
+            st.success(f"Successfully gathered and processed data.")
             st.session_state['all_patterns_df'] = all_patterns_df
         else:
             st.error("No patterns were found for the selected configuration.")
@@ -340,8 +340,39 @@ def main():
                     st.pyplot(fig_plot)
                 except Exception as e:
                     st.error(f"Error viewing selected pattern: {e}")
+
+        # --- Part 3: Trade Analysis ---
+        st.header("Trade Analysis with Optimized Parameters")
+
+        # Button to perform trade analysis
+        if st.button("Perform Trade Analysis"):
+            with st.spinner("Performing trade analysis..."):
+                try:
+                    # Initialize Binance client
+                    client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+
+                    # Perform trade analysis
+                    trade_analysis_results = perform_trade_analysis(client, all_patterns_df)
+
+                    if not trade_analysis_results.empty:
+                        st.success("Trade analysis completed successfully.")
+                        st.session_state['trade_analysis_results'] = trade_analysis_results
+                    else:
+                        st.warning("No trade analysis results available.")
+
+                except Exception as e:
+                    st.error(f"An error occurred during trade analysis: {e}")
+
+        # Display trade analysis results if available
+        if 'trade_analysis_results' in st.session_state:
+            trade_analysis_results = st.session_state['trade_analysis_results']
+            user_results = trade_analysis_results[INTERESTING_COLUMNS]
+            # Display the DataFrame
+            st.subheader("Trade Analysis Results")
+
+            st.dataframe(user_results[user_results.notnull().all(1)])
         else:
-            st.warning("No patterns available for the selected symbol and interval.")
+            st.warning("Please perform trade analysis to view results.")
     else:
         st.info("Please fetch data to visualize patterns.")
 
