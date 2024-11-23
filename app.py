@@ -366,14 +366,11 @@ def main():
             if perform_trade_analysis_button:
                 with st.spinner("Performing trade analysis..."):
                     try:
-                        # Initialize Binance client
-                        client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
-
                         # Retrieve the stored OHLC data from session state
                         ohlc_data_dict = st.session_state['ohlc_data_dict']
 
                         # Perform trade analysis using existing OHLC data
-                        trade_analysis_results = perform_trade_analysis( all_patterns_df, ohlc_data_dict)
+                        trade_analysis_results = perform_trade_analysis(all_patterns_df, ohlc_data_dict)
 
                         if not trade_analysis_results.empty:
                             st.success("Trade analysis completed successfully.")
@@ -387,68 +384,97 @@ def main():
             # Display trade analysis results if available
             if 'trade_analysis_results' in st.session_state:
                 trade_analysis_results = st.session_state['trade_analysis_results']
-                user_results = trade_analysis_results[INTERESTING_COLUMNS]
+
+                # --- Add Filters ---
+                st.subheader("Filter Trade Analysis Results")
+
+                # Create a multiselect for 'exit_reason'
+                exit_reasons = trade_analysis_results['exit_reason'].unique()
+                selected_exit_reasons = st.multiselect(
+                    "Select Exit Reasons to Display",
+                    options=exit_reasons,
+                    default=exit_reasons
+                )
+
+                # Checkbox to filter profitable trades
+                show_profitable = st.checkbox("Show Profitable Trades Only", value=False)
+
+                # Apply filters to the DataFrame
+                filtered_results = trade_analysis_results.copy()
+
+                if selected_exit_reasons:
+                    filtered_results = filtered_results[filtered_results['exit_reason'].isin(selected_exit_reasons)]
+                else:
+                    st.warning("No exit reasons selected. Displaying all trades.")
+
+                if show_profitable:
+                    filtered_results = filtered_results[filtered_results['profit'] > 0]
+
+                # Select only INTERESTING_COLUMNS
+                user_results = filtered_results[INTERESTING_COLUMNS]
 
                 # Display the DataFrame
-                st.subheader("Trade Analysis Results (Only Successful/Unsuccessful Trades)")
-                st.dataframe(user_results[user_results.notnull().all(1)])
+                st.subheader("Filtered Trade Analysis Results")
+                st.dataframe(user_results)
 
                 # Visualization of Trades
                 st.subheader("Visualize Trades with SL and TP Levels")
 
-                # Select a trade to visualize
-                trade_options = [
-                    f"Trade {i + 1}: {row['symbol']} on {row['D_time']} ({'Profit' if row['profit'] > 0 else 'Loss'})"
-                    for i, row in trade_analysis_results.iterrows()
-                ]
+                if not user_results.empty:
+                    # Select a trade to visualize
+                    trade_options = [
+                        f"Trade {i + 1}: {row['symbol']} on {row['D_time']} ({'Profit' if row['profit'] > 0 else 'Loss'})"
+                        for i, row in trade_analysis_results.reset_index().iterrows()
+                    ]
 
-                # Define a form to prevent page jumps when selecting trades
-                with st.form(key='trade_visualization_form'):
-                    selected_trade_option = st.selectbox(
-                        "Select a Trade to Visualize",
-                        options=trade_options,
-                        key='selected_trade'
-                    )
-                    visualize_trade_button = st.form_submit_button("Visualize Trade")
+                    # Define a form to prevent page jumps when selecting trades
+                    with st.form(key='trade_visualization_form'):
+                        selected_trade_option = st.selectbox(
+                            "Select a Trade to Visualize",
+                            options=trade_options,
+                            key='selected_trade'
+                        )
+                        visualize_trade_button = st.form_submit_button("Visualize Trade")
 
-                if visualize_trade_button:
-                    selected_trade_index = trade_options.index(selected_trade_option)
-                    selected_trade = trade_analysis_results.iloc[selected_trade_index]
+                    if visualize_trade_button:
+                        selected_trade_index = trade_options.index(selected_trade_option)
+                        selected_trade = trade_analysis_results.reset_index().iloc[selected_trade_index]
 
-                    # Use stored OHLC data
-                    symbol = selected_trade['symbol']
-                    interval = selected_trade['interval']
-                    key = (symbol, interval)
+                        # Use stored OHLC data
+                        symbol = selected_trade['symbol']
+                        interval = selected_trade['interval']
+                        key = (symbol, interval)
 
-                    ohlc_data= None
+                        if key in st.session_state['ohlc_data_dict']:
+                            ohlc_data = st.session_state['ohlc_data_dict'][key].copy()
+                        else:
+                            st.error(f"OHLC data for {symbol} on {interval} not found.")
+                            st.stop()
 
-                    if key in st.session_state['ohlc_data_dict']:
-                        ohlc_data = st.session_state['ohlc_data_dict'][key].copy()
-                    else:
-                        st.error(f"OHLC data for {symbol} on {interval} not found.")
-                        st.stop()
+                        ohlc_data['open_time'] = pd.to_datetime(ohlc_data['open_time'])
+                        ohlc_data.set_index('open_time', inplace=True)
+                        ohlc_data.sort_index(inplace=True)
 
-                    # Ensure 'open_time' is datetime and set as index
-                    ohlc_data['open_time'] = pd.to_datetime(ohlc_data['open_time'])
-                    ohlc_data.set_index('open_time', inplace=True)
+                        # Prepare the data for plotting
+                        candles_left = 2
+                        candles_right = INTERVAL_PARAMETERS[interval][5] + 1
 
-                    # Prepare the data for plotting
-                    candles_left = 2
-                    candles_right = INTERVAL_PARAMETERS[interval][5] + 1
+                        print(selected_trade)
+                        # Plot the trade using your plotting function
+                        fig = plot_xabcd_patterns_with_sl_tp(
+                            pattern=selected_trade,
+                            ohlc=ohlc_data,
+                            save_plots=False,
+                            candles_left=candles_left,
+                            candles_right=candles_right
+                        )
 
-                    # Plot the trade using your plotting function
-                    fig = plot_xabcd_patterns_with_sl_tp(
-                        pattern=selected_trade,
-                        ohlc=ohlc_data,
-                        save_plots=False,
-                        candles_left=candles_left,
-                        candles_right=candles_right
-                    )
-
-                    if fig:
-                        st.pyplot(fig)
-                    else:
-                        st.error("Failed to generate the plot for the selected trade.")
+                        if fig:
+                            st.pyplot(fig)
+                        else:
+                            st.error("Failed to generate the plot for the selected trade.")
+                else:
+                    st.warning("No trades to display based on the selected filters.")
             else:
                 st.warning("Please perform trade analysis to view results.")
         else:

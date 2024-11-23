@@ -150,11 +150,8 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     # Helper function to find the nearest index
     def find_nearest_idx(dt_index, target_time):
         """Find the index of the nearest timestamp to target_time in dt_index."""
-        dt_array = dt_index.to_numpy()
-        target_np = np.datetime64(target_time)
-        diff = np.abs(dt_array - target_np)
-        nearest_idx = diff.argmin()
-        return nearest_idx
+        idx = dt_index.get_indexer([target_time], method='nearest')[0]
+        return idx
 
     # Extract pattern details
     symbol = pattern['symbol']
@@ -225,6 +222,10 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     take_profit_level = pattern.get('TP', None)
     entry_price = pattern.get('entry_price', None)
     entry_time = pd.to_datetime(pattern['entry_time']) if pd.notna(pattern.get('entry_time')) else None
+
+    print(stop_loss_level)
+    print(take_profit_level)
+
 
     # Ensure the values are finite before plotting them
     if pd.notna(stop_loss_level) and np.isfinite(stop_loss_level):
@@ -333,5 +334,15 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
 
     # Tight layout for better spacing
     plt.tight_layout()
+
+    # Save the plot if requested
+    if save_plots:
+        try:
+            filename = f"XABCD_{pattern_name}_{symbol}_{interval}.jpg"
+            filepath = os.path.join(save_dir, filename)
+            plt.savefig(filepath, format='jpg')
+            print(f"Saved plot to {filepath}")
+        except Exception as e:
+            print(f"Error saving plot: {e}")
 
     return fig

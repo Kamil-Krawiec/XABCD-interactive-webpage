@@ -24,7 +24,7 @@ INTERVAL_PARAMETERS = {
 }
 
 INTERESTING_COLUMNS = [
-    'entry_price', 'SL', 'TP', 'profit', 'Y', 'pattern_name', 'pattern_type',
+    'entry_price', 'exit_reason','SL', 'TP', 'profit', 'Y', 'pattern_name', 'pattern_type',
     'symbol', 'interval','X_time', 'A_time', 'B_time', 'C_time', 'D_time',
     'X_price', 'A_price', 'B_price', 'C_price', 'D_price','entry_time',
 ]
