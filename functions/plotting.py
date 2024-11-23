@@ -1,4 +1,3 @@
-
 import os
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -129,7 +128,9 @@ def plot_xabcd_pattern(pattern, ohlc, save_plots=False, save_dir='charts', candl
     # Return the figure without showing it
     return fig
 
-def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='charts', candles_left=50, candles_right=50):
+
+def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='charts', candles_left=50,
+                                   candles_right=50):
     """
     Plots a single ABCD pattern with Stop-Loss (SL) and Take-Profit (TP) levels on an OHLC candlestick chart.
 
@@ -159,7 +160,6 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     symbol = pattern['symbol']
     interval = pattern['interval']
     pattern_name = pattern['pattern_name']
-    pattern_type = pattern['pattern_type']
     profit = pattern['profit']
     points = ['X', 'A', 'B', 'C', 'D']
     point_times = [pd.to_datetime(pattern[f'{point}_time']) for point in points]
@@ -334,15 +334,4 @@ def plot_xabcd_patterns_with_sl_tp(pattern, ohlc, save_plots=False, save_dir='ch
     # Tight layout for better spacing
     plt.tight_layout()
 
-    # Save the plot if requested
-    if save_plots:
-        try:
-            filename = f"XABCD_{pattern_name}_{symbol}_{interval}.jpg"
-            filepath = os.path.join(save_dir, filename)
-            plt.savefig(filepath, format='jpg')
-            print(f"Saved plot to {filepath}")
-        except Exception as e:
-            print(f"Error saving plot: {e}")
-
-    # Return the figure without showing it
     return fig

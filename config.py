@@ -23,5 +23,8 @@ INTERVAL_PARAMETERS = {
     "30m": [13, 19, 0.282, 1.400, 1.330, 23],
 }
 
-INTERESTING_COLUMNS = ['symbol', 'interval', 'profit', 'exit_reason', 'pattern_name', 'pattern_type', 'entry_time',
-                       'SL', 'TP', 'Y', 'entry_price']
+INTERESTING_COLUMNS = [
+    'entry_price', 'SL', 'TP', 'profit', 'Y', 'pattern_name', 'pattern_type',
+    'symbol', 'interval','X_time', 'A_time', 'B_time', 'C_time', 'D_time',
+    'X_price', 'A_price', 'B_price', 'C_price', 'D_price','entry_time',
+]

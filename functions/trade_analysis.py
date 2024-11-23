@@ -1,16 +1,13 @@
 # trade_analysis.py
 
-import os
 import logging
 import warnings
 import pandas as pd
 import numpy as np
-from binance.client import Client
 
 from config import INTERVAL_PARAMETERS
 from classes.trade_analyzer_class import TradeAnalyzer
 from classes.trade_evaluator import TradeEvaluator
-from functions.binance_api import get_historical_data
 
 warnings.filterwarnings('ignore')
 
@@ -24,13 +21,14 @@ logging.basicConfig(
 )
 
 
-def perform_trade_analysis(client, patterns_df):
+def perform_trade_analysis( patterns_df, ohlc_data_dict):
     """
     Performs trade analysis on the given patterns DataFrame.
 
     Parameters:
     - client: Binance Client instance.
     - patterns_df: DataFrame containing detected patterns.
+    - ohlc_data_dict: Dictionary containing OHLC data for symbols and intervals.
 
     Returns:
     - DataFrame with trade analysis results.
@@ -50,20 +48,17 @@ def perform_trade_analysis(client, patterns_df):
 
         logging.info(f"Processing interval: {interval} with parameters: {params}")
 
-        # Prepare the OHLC data for the symbols in the current interval
+        # Use the passed ohlc_data_dict instead of fetching data
         ohlc_dict = {}
         symbols = interval_df['symbol'].unique()
         for symbol in symbols:
-            try:
-                # Fetch OHLC data
-                ohlc_data = get_historical_data(client, symbol, interval, "2017-01-01")
-                if ohlc_data.empty:
-                    logging.warning(f"No OHLC data retrieved for symbol: {symbol}, interval: {interval}. Skipping.")
-                    continue
-                ohlc_dict[(symbol, interval)] = ohlc_data
-                logging.info(f"Fetched OHLC data for symbol: {symbol}, interval: {interval}.")
-            except Exception as e:
-                logging.error(f"Error fetching OHLC data for symbol: {symbol}, interval: {interval}: {e}")
+            key = (symbol, interval)
+            if key in ohlc_data_dict:
+                ohlc_data = ohlc_data_dict[key]
+                ohlc_dict[key] = ohlc_data
+                logging.info(f"Using stored OHLC data for symbol: {symbol}, interval: {interval}.")
+            else:
+                logging.warning(f"OHLC data for symbol: {symbol}, interval: {interval} not found. Skipping.")
                 continue
 
         if not ohlc_dict:
@@ -111,6 +106,7 @@ def perform_trade_analysis(client, patterns_df):
         interval_df['SL'] = np.nan
         interval_df['TP'] = np.nan
         interval_df['profit'] = 0.0  # Default profit
+        interval_df['exit_reason'] = ''  # To store exit reason
 
         # Iterate over each pattern in interval_df
         for idx, pattern in interval_df.iterrows():
@@ -119,7 +115,8 @@ def perform_trade_analysis(client, patterns_df):
                 key = (symbol, interval)
                 if key not in ohlc_dict:
                     logging.warning(
-                        f"OHLC data for symbol: {symbol}, interval: {interval} not found. Skipping pattern at index {idx}.")
+                        f"OHLC data for symbol: {symbol}, interval: {interval} not found. Skipping pattern at index {idx}."
+                    )
                     continue
 
                 ohlc_data = ohlc_dict[key].copy()
@@ -132,7 +129,7 @@ def perform_trade_analysis(client, patterns_df):
 
                 if trade_levels is not None:
                     # Evaluate trade using TradeEvaluator
-                    profit_percent, outcome, exit_reason  = trade_evaluator.evaluate_trade(
+                    profit_percent, outcome, exit_reason = trade_evaluator.evaluate_trade(
                         trade_levels, ohlc_data, is_bullish=pattern['pattern_type'].lower() == 'bullish'
                     )
 
@@ -143,12 +140,13 @@ def perform_trade_analysis(client, patterns_df):
                     interval_df.at[idx, 'profit'] = profit_percent
                     interval_df.at[idx, 'entry_time'] = trade_levels.get('entry_time', pd.NaT)
                     interval_df.at[idx, 'entry_price'] = trade_levels.get('entry_price', np.nan)
-                    interval_df.at[idx,'exit_reason']=exit_reason
                     interval_df.at[idx, 'SL'] = trade_levels.get('SL', np.nan)
                     interval_df.at[idx, 'TP'] = trade_levels.get('TP', np.nan)
+                    interval_df.at[idx, 'exit_reason'] = exit_reason
                 else:
                     # No trade triggered, 'Y' remains 0 and other fields stay default
                     interval_df.at[idx, 'profit'] = 0.0
+                    interval_df.at[idx, 'exit_reason'] = 'No trade triggered'
 
             except Exception as e:
                 logging.error(f"Error processing pattern at index {idx}: {e}")

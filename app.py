@@ -6,11 +6,11 @@ import streamlit as st
 import plotly.graph_objects as go
 
 from functions.trade_analysis import perform_trade_analysis
-from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS
+from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS
 from classes.pattern_manager_class import PatternManager
 from functions.binance_api import get_historical_data
 from functions.extremas import get_extremes
-from functions.plotting import plot_xabcd_pattern
+from functions.plotting import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 from binance.client import Client
 
 from dotenv import load_dotenv
@@ -46,6 +46,12 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
             return None
         else:
             st.write(f"Fetched {len(historic_data)} rows of historical data for {symbol} on {interval}.")
+
+        # Store OHLC data in session state
+        ohlc_data_key = (symbol, interval)
+        if 'ohlc_data_dict' not in st.session_state:
+            st.session_state['ohlc_data_dict'] = {}
+        st.session_state['ohlc_data_dict'][ohlc_data_key] = historic_data
 
         # Step 2: Detect extreme points
         extremes = get_extremes(historic_data, threshold)
@@ -242,7 +248,6 @@ def main():
             st.error("Please select at least one symbol and one interval.")
             st.stop()
 
-        csv_output_path = "data/crypto_patterns.csv"
         all_patterns_df = pd.DataFrame()
 
         with st.spinner("Collecting and processing data..."):
@@ -344,35 +349,110 @@ def main():
         # --- Part 3: Trade Analysis ---
         st.header("Trade Analysis with Optimized Parameters")
 
-        # Button to perform trade analysis
-        if st.button("Perform Trade Analysis"):
-            with st.spinner("Performing trade analysis..."):
-                try:
-                    # Initialize Binance client
-                    client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+        # Check if patterns are available
+        if 'all_patterns_df' in st.session_state:
+            all_patterns_df = st.session_state['all_patterns_df']
 
-                    # Perform trade analysis
-                    trade_analysis_results = perform_trade_analysis(client, all_patterns_df)
+            # Ensure that OHLC data is stored in session state
+            if 'ohlc_data_dict' not in st.session_state:
+                st.error("OHLC data not found in session state. Please run pattern detection first.")
+                st.stop()
 
-                    if not trade_analysis_results.empty:
-                        st.success("Trade analysis completed successfully.")
-                        st.session_state['trade_analysis_results'] = trade_analysis_results
+            # Define a form to prevent page jumps
+            with st.form(key='trade_analysis_form'):
+                # Button to perform trade analysis
+                perform_trade_analysis_button = st.form_submit_button("Perform Trade Analysis")
+
+            if perform_trade_analysis_button:
+                with st.spinner("Performing trade analysis..."):
+                    try:
+                        # Initialize Binance client
+                        client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+
+                        # Retrieve the stored OHLC data from session state
+                        ohlc_data_dict = st.session_state['ohlc_data_dict']
+
+                        # Perform trade analysis using existing OHLC data
+                        trade_analysis_results = perform_trade_analysis( all_patterns_df, ohlc_data_dict)
+
+                        if not trade_analysis_results.empty:
+                            st.success("Trade analysis completed successfully.")
+                            st.session_state['trade_analysis_results'] = trade_analysis_results
+                        else:
+                            st.warning("No trade analysis results available.")
+
+                    except Exception as e:
+                        st.error(f"An error occurred during trade analysis: {e}")
+
+            # Display trade analysis results if available
+            if 'trade_analysis_results' in st.session_state:
+                trade_analysis_results = st.session_state['trade_analysis_results']
+                user_results = trade_analysis_results[INTERESTING_COLUMNS]
+
+                # Display the DataFrame
+                st.subheader("Trade Analysis Results (Only Successful/Unsuccessful Trades)")
+                st.dataframe(user_results[user_results.notnull().all(1)])
+
+                # Visualization of Trades
+                st.subheader("Visualize Trades with SL and TP Levels")
+
+                # Select a trade to visualize
+                trade_options = [
+                    f"Trade {i + 1}: {row['symbol']} on {row['D_time']} ({'Profit' if row['profit'] > 0 else 'Loss'})"
+                    for i, row in trade_analysis_results.iterrows()
+                ]
+
+                # Define a form to prevent page jumps when selecting trades
+                with st.form(key='trade_visualization_form'):
+                    selected_trade_option = st.selectbox(
+                        "Select a Trade to Visualize",
+                        options=trade_options,
+                        key='selected_trade'
+                    )
+                    visualize_trade_button = st.form_submit_button("Visualize Trade")
+
+                if visualize_trade_button:
+                    selected_trade_index = trade_options.index(selected_trade_option)
+                    selected_trade = trade_analysis_results.iloc[selected_trade_index]
+
+                    # Use stored OHLC data
+                    symbol = selected_trade['symbol']
+                    interval = selected_trade['interval']
+                    key = (symbol, interval)
+
+                    ohlc_data= None
+
+                    if key in st.session_state['ohlc_data_dict']:
+                        ohlc_data = st.session_state['ohlc_data_dict'][key].copy()
                     else:
-                        st.warning("No trade analysis results available.")
+                        st.error(f"OHLC data for {symbol} on {interval} not found.")
+                        st.stop()
 
-                except Exception as e:
-                    st.error(f"An error occurred during trade analysis: {e}")
+                    # Ensure 'open_time' is datetime and set as index
+                    ohlc_data['open_time'] = pd.to_datetime(ohlc_data['open_time'])
+                    ohlc_data.set_index('open_time', inplace=True)
 
-        # Display trade analysis results if available
-        if 'trade_analysis_results' in st.session_state:
-            trade_analysis_results = st.session_state['trade_analysis_results']
-            user_results = trade_analysis_results[INTERESTING_COLUMNS]
-            # Display the DataFrame
-            st.subheader("Trade Analysis Results")
+                    # Prepare the data for plotting
+                    candles_left = 2
+                    candles_right = INTERVAL_PARAMETERS[interval][5] + 1
 
-            st.dataframe(user_results[user_results.notnull().all(1)])
+                    # Plot the trade using your plotting function
+                    fig = plot_xabcd_patterns_with_sl_tp(
+                        pattern=selected_trade,
+                        ohlc=ohlc_data,
+                        save_plots=False,
+                        candles_left=candles_left,
+                        candles_right=candles_right
+                    )
+
+                    if fig:
+                        st.pyplot(fig)
+                    else:
+                        st.error("Failed to generate the plot for the selected trade.")
+            else:
+                st.warning("Please perform trade analysis to view results.")
         else:
-            st.warning("Please perform trade analysis to view results.")
+            st.warning("No patterns available for trade analysis.")
     else:
         st.info("Please fetch data to visualize patterns.")
 
