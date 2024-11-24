@@ -1,109 +1,118 @@
-from binance import Client
 import os
-from datetime import datetime
 import pandas as pd
-from datetime import datetime as time
+from datetime import datetime
+from binance.helpers import date_to_milliseconds
 
-
-def get_historical_data(client, symbol, interval, start_str=None, end_str=time.today(), cache_dir='cache'):
-    """
-    Fetches historical candlestick data from Binance with caching.
-
-    :param client: Client object from the Binance API
-    :param symbol: Market symbol, e.g., 'BTCUSDT'
-    :param interval: Candlestick interval, e.g., '1h', '1d', '15m'
-    :param start_str: Start date as a string, e.g., 'YYYY-MM-DD' or '1 Jan, 2021'
-    :param end_str: End date as a string, e.g., 'YYYY-MM-DD' or '1 Jan, 2021' (optional)
-    :param cache_dir: Directory to store cache files
-    :return: DataFrame containing candlestick data
-    """
-    # Ensure the cache directory exists
+def get_historical_data(client, symbol, interval, start_str, end_str=None, cache_dir='cache'):
+    # Ensure cache directory exists
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
 
-    # Define the cache file path
+    # Define cache file path
     cache_file = os.path.join(cache_dir, f"{symbol}_{interval}.csv")
 
-    # Try to read cached data
+    # Initialize variables
+    all_data = []
+    last_cached_end_time = None
+
+    # Try to load cached data
     if os.path.exists(cache_file):
         print(f"Reading cached data from {cache_file}")
-        cached_df = pd.read_csv(cache_file, parse_dates=['open_time', 'close_time'])
+        cached_df = pd.read_csv(cache_file)
+        cached_df['open_time'] = pd.to_datetime(cached_df['open_time'])
+        cached_df['close_time'] = pd.to_datetime(cached_df['close_time'])
+
+        # Get the last timestamp from cached data
+        last_cached_end_time = cached_df['open_time'].max()
+        all_data.append(cached_df)
     else:
-        print(f"No cache found at {cache_file}")
         cached_df = pd.DataFrame()
 
-    # Convert start_str and end_str to datetime objects
-    if start_str:
-        start_dt = pd.to_datetime(start_str)
+    # Convert start and end times to milliseconds
+    if isinstance(start_str, str):
+        start_ts = date_to_milliseconds(start_str)
     else:
-        start_dt = None
+        start_ts = int(start_str.timestamp() * 1000)
+
     if end_str:
-        end_dt = pd.to_datetime(end_str)
+        if isinstance(end_str, str):
+            end_ts = date_to_milliseconds(end_str)
+        else:
+            end_ts = int(end_str.timestamp() * 1000)
     else:
-        end_dt = None
+        end_ts = None  # Binance will fetch up to the current time if end_ts is None
 
-    missing_intervals = []
+    # If cached data exists and covers the required range, return cached data
+    if last_cached_end_time and start_ts >= int(last_cached_end_time.timestamp() * 1000):
+        df = cached_df[cached_df['open_time'] >= pd.to_datetime(start_ts, unit='ms')]
+        return df
 
-    if not cached_df.empty:
-        # Get the earliest and latest timestamps in the cache
-        cached_start = cached_df['open_time'].min()
-        cached_end = cached_df['open_time'].max()
+    # Adjust start timestamp to fetch data after the cached data
+    if last_cached_end_time:
+        start_ts = int(last_cached_end_time.timestamp() * 1000) + 1  # Add 1 ms to avoid duplication
 
-        # Check if the cached data covers the requested range
-        if start_dt:
-            if start_dt < cached_start:
-                # Need to fetch data from start_dt to cached_start
-                missing_intervals.append(
-                    (start_dt.strftime('%Y-%m-%d %H:%M:%S'), cached_start.strftime('%Y-%m-%d %H:%M:%S')))
+    # Fetch new data from Binance
+    klines = []
+    limit = 1000  # Max number of records per request
+    while True:
+        fetch_end_ts = None
+        if end_ts:
+            fetch_end_ts = min(end_ts, start_ts + limit * 60 * 1000)
 
-        if end_dt:
-            if end_dt > cached_end:
-                # Need to fetch data from cached_end to end_dt
-                missing_intervals.append(
-                    (cached_end.strftime('%Y-%m-%d %H:%M:%S'), end_dt.strftime('%Y-%m-%d %H:%M:%S')))
-    else:
-        # Cache is empty, need to fetch all data
-        if start_dt is None:
-            raise ValueError("start_str must be provided when cache is empty")
-        missing_intervals.append(
-            (start_dt.strftime('%Y-%m-%d %H:%M:%S'), end_dt.strftime('%Y-%m-%d %H:%M:%S') if end_dt else None))
+        new_klines = client.get_klines(
+            symbol=symbol,
+            interval=interval,
+            limit=limit,
+            startTime=start_ts,
+            endTime=fetch_end_ts
+        )
 
-    new_data = []
+        if not new_klines:
+            break
 
-    # Fetch missing data
-    for fetch_start, fetch_end in missing_intervals:
-        print(f"Fetching data from Binance for {symbol} {interval} from {fetch_start} to {fetch_end}")
-        candles = client.get_historical_klines(symbol, interval, fetch_start, fetch_end)
-        for candle in candles:
-            new_data.append({
-                'open_time': datetime.fromtimestamp(candle[0] / 1000),
-                'open': float(candle[1]),
-                'high': float(candle[2]),
-                'low': float(candle[3]),
-                'close': float(candle[4]),
-                'volume': float(candle[5]),
-                'close_time': datetime.fromtimestamp(candle[6] / 1000),
-                'quote_asset_volume': float(candle[7]),
-                'number_of_trades': int(candle[8]),
-                'taker_buy_base_asset_volume': float(candle[9]),
-                'taker_buy_quote_asset_volume': float(candle[10]),
-                'ignore': candle[11]
-            })
+        klines.extend(new_klines)
+        start_ts = new_klines[-1][0] + 1  # Start from the next timestamp
 
-    if new_data:
-        new_df = pd.DataFrame(new_data)
+        # Break if we've reached the end timestamp
+        if end_ts and start_ts >= end_ts:
+            break
+
+    if klines:
+        columns = [
+            'open_time', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+        ]
+        new_df = pd.DataFrame(klines, columns=columns)
+        new_df['open_time'] = pd.to_datetime(new_df['open_time'], unit='ms')
+        new_df['close_time'] = pd.to_datetime(new_df['close_time'], unit='ms')
+
+        # Convert numeric columns to float
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume',
+                        'quote_asset_volume', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume']
+        new_df[numeric_cols] = new_df[numeric_cols].astype(float)
+        new_df['number_of_trades'] = new_df['number_of_trades'].astype(int)
+
+        all_data.append(new_df)
+
+        # Combine new data with cached data
         if not cached_df.empty:
-            # Combine with cached data
             combined_df = pd.concat([cached_df, new_df], ignore_index=True)
-            # Drop duplicates
             combined_df.drop_duplicates(subset=['open_time'], inplace=True)
-            # Sort by open_time
             combined_df.sort_values('open_time', inplace=True)
         else:
             combined_df = new_df
-        # Save the combined data back to cache
+
+        # Save combined data to cache
         combined_df.to_csv(cache_file, index=False)
     else:
         combined_df = cached_df
+
+    # Filter data for the requested range
+    combined_df = combined_df[combined_df['open_time'] >= pd.to_datetime(start_str)]
+    if end_str:
+        combined_df = combined_df[combined_df['open_time'] <= pd.to_datetime(end_str)]
+
+    combined_df.reset_index(drop=True, inplace=True)
 
     return combined_df

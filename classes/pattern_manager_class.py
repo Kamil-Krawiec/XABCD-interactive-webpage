@@ -194,95 +194,100 @@ class PatternManager:
         return self.pattern_df
 
     def extract_pattern_info(self, pattern: XABCDPatternFound) -> dict:
-        X_idx, A_idx, B_idx, C_idx, D_idx = pattern.X, pattern.A, pattern.B, pattern.C, pattern.D
+        try:
+            X_idx, A_idx, B_idx, C_idx, D_idx = pattern.X, pattern.A, pattern.B, pattern.C, pattern.D
 
-        # Get prices at points X, A, B, C, D based on pattern type
-        X = self.ohlc['low'][X_idx] if pattern.bull else self.ohlc['high'][X_idx]
-        A = self.ohlc['high'][A_idx] if pattern.bull else self.ohlc['low'][A_idx]
-        B = self.ohlc['low'][B_idx] if pattern.bull else self.ohlc['high'][B_idx]
-        C = self.ohlc['high'][C_idx] if pattern.bull else self.ohlc['low'][C_idx]
-        D = self.ohlc['low'][D_idx] if pattern.bull else self.ohlc['high'][D_idx]
+            # Get prices at points X, A, B, C, D based on pattern type
+            X = self.ohlc['low'][X_idx] if pattern.bull else self.ohlc['high'][X_idx]
+            A = self.ohlc['high'][A_idx] if pattern.bull else self.ohlc['low'][A_idx]
+            B = self.ohlc['low'][B_idx] if pattern.bull else self.ohlc['high'][B_idx]
+            C = self.ohlc['high'][C_idx] if pattern.bull else self.ohlc['low'][C_idx]
+            D = self.ohlc['low'][D_idx] if pattern.bull else self.ohlc['high'][D_idx]
 
-        # Calculate harmonic ratios
-        ratio_AB_XA, ratio_BC_AB, ratio_CD_BC, ratio_AD_XA = calculate_harmonic_ratios(X, A, B, C, D)
+            # Calculate harmonic ratios
+            ratio_AB_XA, ratio_BC_AB, ratio_CD_BC, ratio_AD_XA = calculate_harmonic_ratios(X, A, B, C, D)
 
-        # Determine the pattern type
-        pattern_type = "Bullish" if pattern.bull else "Bearish"
+            # Determine the pattern type
+            pattern_type = "Bullish" if pattern.bull else "Bearish"
 
-        # Extract technical indicators at points X, A, B, C, D
-        indicators = ['RSI_14', 'MACD', 'MACD_signal', 'MACD_hist', 'stoch_k', 'stoch_d', 'ADX', 'CCI',
-                      'OBV', 'EMA_14', 'BB_bandwidth', 'ATR', 'PSAR', 'Volume_MA_20', 'Volume_Oscillator',
-                      'Ichimoku_Tenkan_Sen', 'Ichimoku_Kijun_Sen', 'Ichimoku_Senkou_Span_A',
-                      'Ichimoku_Senkou_Span_B', 'Ichimoku_Chikou_Span']
+            # Extract technical indicators at points X, A, B, C, D
+            indicators = ['RSI_14', 'MACD', 'MACD_signal', 'MACD_hist', 'stoch_k', 'stoch_d', 'ADX', 'CCI',
+                          'OBV', 'EMA_14', 'BB_bandwidth', 'ATR', 'PSAR', 'Volume_MA_20', 'Volume_Oscillator',
+                          'Ichimoku_Tenkan_Sen', 'Ichimoku_Kijun_Sen', 'Ichimoku_Senkou_Span_A',
+                          'Ichimoku_Senkou_Span_B', 'Ichimoku_Chikou_Span']
 
-        # Initialize dictionaries to store indicators at each point
-        indicator_values = {indicator: {} for indicator in indicators}
+            # Initialize dictionaries to store indicators at each point
+            indicator_values = {indicator: {} for indicator in indicators}
 
-        # Collect indicators at each point
-        for idx_label, idx in zip(['X', 'A', 'B', 'C', 'D'], [X_idx, A_idx, B_idx, C_idx, D_idx]):
+            # Collect indicators at each point
+            for idx_label, idx in zip(['X', 'A', 'B', 'C', 'D'], [X_idx, A_idx, B_idx, C_idx, D_idx]):
+                for indicator in indicators:
+                    indicator_value = self.tech_indicators.get_indicator(indicator, idx)
+                    indicator_values[indicator][f'{indicator}_at_{idx_label}'] = indicator_value
+
+
+            # Compute angles between points
+            angle_XA = self.tech_indicators.calculate_angle(X_idx, A_idx)
+            angle_AB = self.tech_indicators.calculate_angle(A_idx, B_idx)
+            angle_BC = self.tech_indicators.calculate_angle(B_idx, C_idx)
+            angle_CD = self.tech_indicators.calculate_angle(C_idx, D_idx)
+
+
+            # Extract time and duration information
+            pattern_info = {
+                'pattern_name': pattern.name,
+                'pattern_type': pattern_type,
+                'pattern_start_time': self.ohlc['open_time'][X_idx],
+                'pattern_end_time': self.ohlc['open_time'][D_idx],
+                'X_time': self.ohlc['open_time'][X_idx],
+                'X_price': X,
+                'A_time': self.ohlc['open_time'][A_idx],
+                'A_price': A,
+                'B_time': self.ohlc['open_time'][B_idx],
+                'B_price': B,
+                'C_time': self.ohlc['open_time'][C_idx],
+                'C_price': C,
+                'D_time': self.ohlc['open_time'][D_idx],
+                'D_price': D,
+                'ratio_AB_XA': ratio_AB_XA,
+                'ratio_BC_AB': ratio_BC_AB,
+                'ratio_CD_BC': ratio_CD_BC,
+                'ratio_AD_XA': ratio_AD_XA,
+                'pattern_duration': (self.ohlc['close_time'][D_idx] - self.ohlc['open_time'][X_idx]).total_seconds() / 60,
+                'duration_XA': (self.ohlc['open_time'][A_idx] - self.ohlc['open_time'][X_idx]).total_seconds() / 60,
+                'duration_AB': (self.ohlc['open_time'][B_idx] - self.ohlc['open_time'][A_idx]).total_seconds() / 60,
+                'duration_BC': (self.ohlc['open_time'][C_idx] - self.ohlc['open_time'][B_idx]).total_seconds() / 60,
+                'duration_CD': (self.ohlc['open_time'][D_idx] - self.ohlc['open_time'][C_idx]).total_seconds() / 60,
+                'open_price_at_D': self.ohlc['open'][D_idx],
+                'close_price_at_D': self.ohlc['close'][D_idx],
+                'volume_at_D': self.ohlc['volume'][D_idx],
+                'quote_asset_volume_at_D': self.ohlc['quote_asset_volume'][D_idx],
+                'number_of_trades_at_D': self.ohlc['number_of_trades'][D_idx],
+                'taker_buy_base_asset_volume_at_D': self.ohlc['taker_buy_base_asset_volume'][D_idx],
+                'taker_buy_quote_asset_volume_at_D': self.ohlc['taker_buy_quote_asset_volume'][D_idx],
+                # Angles between points
+                'angle_XA': angle_XA,
+                'angle_AB': angle_AB,
+                'angle_BC': angle_BC,
+                'angle_CD': angle_CD,
+                # Additional external data
+                'fear_greed_index_at_D': self.request_extractor.get_fear_greed_index_at_time(
+                    self.ohlc['close_time'][D_idx]),
+                'SP500_at_D': self.request_extractor.get_SP500_index_at_time('SPY', self.ohlc['close_time'][D_idx]),
+            }
+
+            # Collect Bollinger Bands at each point
+            for idx_label, idx in zip(['X', 'A', 'B', 'C', 'D'], [X_idx, A_idx, B_idx, C_idx, D_idx]):
+                pattern_info[f'BB_upper_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_upper', idx)
+                pattern_info[f'BB_middle_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_middle', idx)
+                pattern_info[f'BB_lower_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_lower', idx)
+
+
+            # Merge indicator values into pattern_info
             for indicator in indicators:
-                indicator_value = self.tech_indicators.get_indicator(indicator, idx)
-                indicator_values[indicator][f'{indicator}_at_{idx_label}'] = indicator_value
+                pattern_info.update(indicator_values[indicator])
 
-
-        # Compute angles between points
-        angle_XA = self.tech_indicators.calculate_angle(X_idx, A_idx)
-        angle_AB = self.tech_indicators.calculate_angle(A_idx, B_idx)
-        angle_BC = self.tech_indicators.calculate_angle(B_idx, C_idx)
-        angle_CD = self.tech_indicators.calculate_angle(C_idx, D_idx)
-
-        # Extract time and duration information
-        pattern_info = {
-            'pattern_name': pattern.name,
-            'pattern_type': pattern_type,
-            'pattern_start_time': self.ohlc['open_time'][X_idx],
-            'pattern_end_time': self.ohlc['open_time'][D_idx],
-            'X_time': self.ohlc['open_time'][X_idx],
-            'X_price': X,
-            'A_time': self.ohlc['open_time'][A_idx],
-            'A_price': A,
-            'B_time': self.ohlc['open_time'][B_idx],
-            'B_price': B,
-            'C_time': self.ohlc['open_time'][C_idx],
-            'C_price': C,
-            'D_time': self.ohlc['open_time'][D_idx],
-            'D_price': D,
-            'ratio_AB_XA': ratio_AB_XA,
-            'ratio_BC_AB': ratio_BC_AB,
-            'ratio_CD_BC': ratio_CD_BC,
-            'ratio_AD_XA': ratio_AD_XA,
-            'pattern_duration': (self.ohlc['close_time'][D_idx] - self.ohlc['open_time'][X_idx]).total_seconds() / 60,
-            'duration_XA': (self.ohlc['open_time'][A_idx] - self.ohlc['open_time'][X_idx]).total_seconds() / 60,
-            'duration_AB': (self.ohlc['open_time'][B_idx] - self.ohlc['open_time'][A_idx]).total_seconds() / 60,
-            'duration_BC': (self.ohlc['open_time'][C_idx] - self.ohlc['open_time'][B_idx]).total_seconds() / 60,
-            'duration_CD': (self.ohlc['open_time'][D_idx] - self.ohlc['open_time'][C_idx]).total_seconds() / 60,
-            'open_price_at_D': self.ohlc['open'][D_idx],
-            'close_price_at_D': self.ohlc['close'][D_idx],
-            'volume_at_D': self.ohlc['volume'][D_idx],
-            'quote_asset_volume_at_D': self.ohlc['quote_asset_volume'][D_idx],
-            'number_of_trades_at_D': self.ohlc['number_of_trades'][D_idx],
-            'taker_buy_base_asset_volume_at_D': self.ohlc['taker_buy_base_asset_volume'][D_idx],
-            'taker_buy_quote_asset_volume_at_D': self.ohlc['taker_buy_quote_asset_volume'][D_idx],
-            # Angles between points
-            'angle_XA': angle_XA,
-            'angle_AB': angle_AB,
-            'angle_BC': angle_BC,
-            'angle_CD': angle_CD,
-            # Additional external data
-            'fear_greed_index_at_D': self.request_extractor.get_fear_greed_index_at_time(
-                self.ohlc['close_time'][D_idx]),
-            'SP500_at_D': self.request_extractor.get_SP500_index_at_time('SPY', self.ohlc['close_time'][D_idx]),
-        }
-
-        # Collect Bollinger Bands at each point
-        for idx_label, idx in zip(['X', 'A', 'B', 'C', 'D'], [X_idx, A_idx, B_idx, C_idx, D_idx]):
-            pattern_info[f'BB_upper_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_upper', idx)
-            pattern_info[f'BB_middle_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_middle', idx)
-            pattern_info[f'BB_lower_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_lower', idx)
-
-
-        # Merge indicator values into pattern_info
-        for indicator in indicators:
-            pattern_info.update(indicator_values[indicator])
-
-        return pattern_info
+            return pattern_info
+        except Exception as e:
+            print(e)
+            return {}

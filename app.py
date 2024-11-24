@@ -51,6 +51,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         ohlc_data_key = (symbol, interval)
         if 'ohlc_data_dict' not in st.session_state:
             st.session_state['ohlc_data_dict'] = {}
+
         st.session_state['ohlc_data_dict'][ohlc_data_key] = historic_data
 
         # Step 2: Detect extreme points
@@ -87,6 +88,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         # Add extra columns to track symbol and interval
         pm.pattern_df['symbol'] = symbol
         pm.pattern_df['interval'] = interval
+
 
         return pm.pattern_df
 
