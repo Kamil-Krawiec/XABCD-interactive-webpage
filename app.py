@@ -1,6 +1,4 @@
 # app.py
-
-import os
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -13,9 +11,8 @@ from functions.extremas import get_extremes
 from functions.plotting import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 from binance.client import Client
 
-from dotenv import load_dotenv
 
-load_dotenv()
+ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
 
 
 def process_symbol_interval(symbol, interval, start_date, threshold, delta):
@@ -34,7 +31,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     """
     try:
         # Initialize Binance client with API credentials
-        client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+        client = Client()
         st.write(f"Processing {symbol} on {interval} interval from {start_date}")
 
         # Step 1: Get historical data
@@ -67,7 +64,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         # Step 3: Initialize PatternManager
         pm = PatternManager(
             historic_data, extremes, delta,
-            api_key_alpha_vantage=os.getenv('ALPHA_VANTAGE_KEY'),
+            api_key_alpha_vantage=ALPHA_VANTAGE_KEY,
             symbol=symbol,
             interval=interval
         )
@@ -106,7 +103,7 @@ def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_sele
     - symbol_selected (str): Selected cryptocurrency symbol.
     - interval_selected (str): Selected time interval.
     """
-    client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+    client = Client()
     # Fetch the earliest pattern start time to cover all patterns
     earliest_pattern_start_time = pd.to_datetime(filtered_df['pattern_start_time']).min()
     start_date_plot = earliest_pattern_start_time.strftime('%Y-%m-%d')
@@ -160,7 +157,7 @@ def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_sele
 
 
 def plot_selected_pattern(pattern, candles_left, candles_right):
-    client = Client(os.getenv('API_KEY'), os.getenv('SECRET_KEY'))
+    client = Client()
     symbol = pattern['symbol']
     interval = pattern['interval']
     pattern_start_time = pattern['pattern_start_time']
