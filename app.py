@@ -32,9 +32,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         st.write(f"Processing {symbol} on {interval} interval from {start_date}")
 
         # Step 1: Get historical data
-        print(symbol)
         historic_data = get_historical_data(symbol, interval, start_date)
-        print(historic_data)
 
         # Check if historical data is available
         if historic_data is None or historic_data.empty:
