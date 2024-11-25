@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import requests
 
+
 class RequestManager:
     def __init__(self, api_key: str, cache_path='./cache/sp500_cache.csv'):
         self.api_key = api_key

@@ -6,8 +6,8 @@ import pandas as pd
 import numpy as np
 
 from config import INTERVAL_PARAMETERS
-from classes.trade_analyzer_class import TradeAnalyzer
-from classes.trade_evaluator import TradeEvaluator
+from classes import TradeAnalyzer
+from classes import TradeEvaluator
 
 warnings.filterwarnings('ignore')
 

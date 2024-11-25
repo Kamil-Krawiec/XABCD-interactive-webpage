@@ -13,7 +13,7 @@ ta
 
 # APIs and Requests
 requests==2.31.0
-python-binance==1.0.19
+yfinance
 python-dotenv==1.0.0
 
 # Data Classes and Utilities

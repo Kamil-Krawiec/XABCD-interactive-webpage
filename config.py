@@ -28,3 +28,12 @@ INTERESTING_COLUMNS = [
     'symbol', 'interval','X_time', 'A_time', 'B_time', 'C_time', 'D_time',
     'X_price', 'A_price', 'B_price', 'C_price', 'D_price','entry_time',
 ]
+
+
+YAHOO_SYMBOL_MAPPING={
+    "BTCETH": "BTC-ETH",
+    "BTCUSDT": "BTC-USD",
+    "ETHUSDT": "ETH-USD",
+    "BNBUSDT": "BNB-USD",
+    "SOLUSDT": "SOL-USD",
+}

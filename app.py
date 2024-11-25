@@ -3,13 +3,12 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
-from functions.trade_analysis import perform_trade_analysis
+from functions import perform_trade_analysis
 from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS
-from classes.pattern_manager_class import PatternManager
-from functions.binance_api import get_historical_data
-from functions.extremas import get_extremes
-from functions.plotting import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
-from binance.client import Client
+from classes import PatternManager
+from functions import get_historical_data
+from functions import get_extremes
+from functions import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 
 
 ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
@@ -30,12 +29,12 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     - pd.DataFrame or None: DataFrame containing detected patterns or None if no patterns found.
     """
     try:
-        # Initialize Binance client with API credentials
-        client = Client()
         st.write(f"Processing {symbol} on {interval} interval from {start_date}")
 
         # Step 1: Get historical data
-        historic_data = get_historical_data(client, symbol, interval, start_date)
+        print(symbol)
+        historic_data = get_historical_data(symbol, interval, start_date)
+        print(historic_data)
 
         # Check if historical data is available
         if historic_data is None or historic_data.empty:
@@ -103,11 +102,10 @@ def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_sele
     - symbol_selected (str): Selected cryptocurrency symbol.
     - interval_selected (str): Selected time interval.
     """
-    client = Client()
     # Fetch the earliest pattern start time to cover all patterns
     earliest_pattern_start_time = pd.to_datetime(filtered_df['pattern_start_time']).min()
     start_date_plot = earliest_pattern_start_time.strftime('%Y-%m-%d')
-    historic_data = get_historical_data(client, symbol_selected, interval_selected, start_date_plot)
+    historic_data = get_historical_data(symbol_selected, interval_selected, start_date_plot)
     if historic_data is None or historic_data.empty:
         st.error("Failed to retrieve OHLC data for plotting.")
         return
@@ -157,7 +155,6 @@ def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_sele
 
 
 def plot_selected_pattern(pattern, candles_left, candles_right):
-    client = Client()
     symbol = pattern['symbol']
     interval = pattern['interval']
     pattern_start_time = pattern['pattern_start_time']
@@ -175,7 +172,7 @@ def plot_selected_pattern(pattern, candles_left, candles_right):
     start_date_plot = (pattern_start_time_dt - pd.Timedelta(candles_left * interval_value, unit=interval_unit))
     end_date_plot = (D_time_dt + pd.Timedelta(candles_right * interval_value, unit=interval_unit))
 
-    historic_data = get_historical_data(client, symbol, interval, start_date_plot.strftime('%Y-%m-%d'),
+    historic_data = get_historical_data(symbol, interval, start_date_plot.strftime('%Y-%m-%d'),
                                         end_date_plot.strftime('%Y-%m-%d'))
     if historic_data is None or historic_data.empty:
         st.error("Failed to retrieve OHLC data for plotting.")

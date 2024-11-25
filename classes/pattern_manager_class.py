@@ -2,10 +2,10 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pandas as pd
-from classes.XABCD_classes import ValidPatterns, XABCDPatternFound
+from classes import ValidPatterns, XABCDPatternFound
 from classes.request_manager_class import RequestManager
-from functions.pattern_error_and_ratios import calculate_harmonic_ratios, calculate_error
-from classes.technical_indicators_class import TechnicalIndicators
+from functions import calculate_harmonic_ratios, calculate_error
+from classes import TechnicalIndicators
 
 
 class PatternManager:
@@ -225,13 +225,11 @@ class PatternManager:
                     indicator_value = self.tech_indicators.get_indicator(indicator, idx)
                     indicator_values[indicator][f'{indicator}_at_{idx_label}'] = indicator_value
 
-
             # Compute angles between points
             angle_XA = self.tech_indicators.calculate_angle(X_idx, A_idx)
             angle_AB = self.tech_indicators.calculate_angle(A_idx, B_idx)
             angle_BC = self.tech_indicators.calculate_angle(B_idx, C_idx)
             angle_CD = self.tech_indicators.calculate_angle(C_idx, D_idx)
-
 
             # Extract time and duration information
             pattern_info = {
@@ -253,7 +251,8 @@ class PatternManager:
                 'ratio_BC_AB': ratio_BC_AB,
                 'ratio_CD_BC': ratio_CD_BC,
                 'ratio_AD_XA': ratio_AD_XA,
-                'pattern_duration': (self.ohlc['close_time'][D_idx] - self.ohlc['open_time'][X_idx]).total_seconds() / 60,
+                'pattern_duration': (self.ohlc['close_time'][D_idx] - self.ohlc['open_time'][
+                    X_idx]).total_seconds() / 60,
                 'duration_XA': (self.ohlc['open_time'][A_idx] - self.ohlc['open_time'][X_idx]).total_seconds() / 60,
                 'duration_AB': (self.ohlc['open_time'][B_idx] - self.ohlc['open_time'][A_idx]).total_seconds() / 60,
                 'duration_BC': (self.ohlc['open_time'][C_idx] - self.ohlc['open_time'][B_idx]).total_seconds() / 60,
@@ -261,10 +260,6 @@ class PatternManager:
                 'open_price_at_D': self.ohlc['open'][D_idx],
                 'close_price_at_D': self.ohlc['close'][D_idx],
                 'volume_at_D': self.ohlc['volume'][D_idx],
-                'quote_asset_volume_at_D': self.ohlc['quote_asset_volume'][D_idx],
-                'number_of_trades_at_D': self.ohlc['number_of_trades'][D_idx],
-                'taker_buy_base_asset_volume_at_D': self.ohlc['taker_buy_base_asset_volume'][D_idx],
-                'taker_buy_quote_asset_volume_at_D': self.ohlc['taker_buy_quote_asset_volume'][D_idx],
                 # Angles between points
                 'angle_XA': angle_XA,
                 'angle_AB': angle_AB,
@@ -281,7 +276,6 @@ class PatternManager:
                 pattern_info[f'BB_upper_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_upper', idx)
                 pattern_info[f'BB_middle_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_middle', idx)
                 pattern_info[f'BB_lower_at_{idx_label}'] = self.tech_indicators.get_indicator('BB_lower', idx)
-
 
             # Merge indicator values into pattern_info
             for indicator in indicators:
