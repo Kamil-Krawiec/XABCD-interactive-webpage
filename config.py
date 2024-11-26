@@ -16,7 +16,7 @@ DEFAULT_DELTAS = {
 
 INTERVAL_PARAMETERS = {
     # [atr_period, n_candles, cd_retrace, atr_multiplier, risk_reward, max_holding_period]
-    "1w": [6, 1, 0.216, 0.4573332, 2.98, 3],
+    "1wk": [6, 1, 0.216, 0.4573332, 2.98, 3],
     "1d": [28, 2, 0.33, 1.54, 2.76, 13],
     "4h": [9, 2, 0.349, 1.1, 2.764, 60],
     "1h": [17, 29, 0.112, 1.303, 1.017, 28],
@@ -36,4 +36,10 @@ YAHOO_SYMBOL_MAPPING={
     "ETHUSDT": "ETH-USD",
     "BNBUSDT": "BNB-USD",
     "SOLUSDT": "SOL-USD",
+}
+
+
+MAX_REQUESTS_DAYS={
+    '30m': 60,
+    '1h': 730,
 }

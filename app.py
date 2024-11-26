@@ -2,9 +2,11 @@
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+from datetime import datetime, timedelta
+
 
 from functions import perform_trade_analysis
-from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS
+from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS
 from classes import PatternManager
 from functions import get_historical_data
 from functions import get_extremes
@@ -82,7 +84,6 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         # Add extra columns to track symbol and interval
         pm.pattern_df['symbol'] = symbol
         pm.pattern_df['interval'] = interval
-
 
         return pm.pattern_df
 
@@ -209,9 +210,28 @@ def main():
     # User selects intervals
     intervals = st.sidebar.multiselect(
         "Select Intervals",
-        ["1w", "1d", "4h", "1h", "30m"],
+        ["1wk", "1d", "1h", "30m"],
         default=["1d"]
     )
+
+    # Determine the earliest allowed start date based on selected intervals
+    max_days_list = [MAX_REQUESTS_DAYS.get(interval, None) for interval in intervals]
+    max_days_list = [days for days in max_days_list if days is not None]
+
+    if max_days_list:
+        min_days = min(max_days_list)
+        earliest_allowed_date = datetime.utcnow() - timedelta(days=min_days)
+    else:
+        # If no constraints apply, allow any date (e.g., from 2010-01-01)
+        earliest_allowed_date = datetime(2017, 1, 1)
+
+    # User selects start date with constraints
+    start_date = st.sidebar.date_input(
+        "Start Date",
+        value=datetime.utcnow().date(),
+        min_value=earliest_allowed_date.date(),
+        max_value=datetime.utcnow().date()
+    ).strftime("%Y-%m-%d")
 
     # Let users input thresholds and deltas
     thresholds = {}
@@ -230,12 +250,6 @@ def main():
             value=default_delta, step=0.001, format="%.3f"
         )
 
-    # User selects start date
-    start_date = st.sidebar.date_input(
-        "Start Date",
-        pd.to_datetime("2017-01-01")
-    ).strftime("%Y-%m-%d")
-
     # Button to fetch data
     if st.sidebar.button("Fetch and Analyze"):
         if not symbols or not intervals:
@@ -252,7 +266,7 @@ def main():
                         all_patterns_df = pd.concat([all_patterns_df, df], ignore_index=True)
 
         if not all_patterns_df.empty:
-            # Save the master DataFrame to CSV
+            # Save the master DataFrame to session state
             st.success(f"Successfully gathered and processed data.")
             st.session_state['all_patterns_df'] = all_patterns_df
         else:
@@ -382,6 +396,14 @@ def main():
                 # --- Add Filters ---
                 st.subheader("Filter Trade Analysis Results")
 
+                # Create a multiselect for 'symbol'
+                symbols = trade_analysis_results['symbol'].unique()
+                selected_symbols = st.multiselect(
+                    "Select Symbols to Display",
+                    options=symbols,
+                    default=symbols
+                )
+
                 # Create a multiselect for 'exit_reason'
                 exit_reasons = trade_analysis_results['exit_reason'].unique()
                 selected_exit_reasons = st.multiselect(
@@ -395,6 +417,11 @@ def main():
 
                 # Apply filters to the DataFrame
                 filtered_results = trade_analysis_results.copy()
+
+                if selected_symbols:
+                    filtered_results = filtered_results[filtered_results['symbol'].isin(selected_symbols)]
+                else:
+                    st.warning("No symbols selected. Displaying all trades.")
 
                 if selected_exit_reasons:
                     filtered_results = filtered_results[filtered_results['exit_reason'].isin(selected_exit_reasons)]
@@ -415,7 +442,7 @@ def main():
                 st.subheader("Visualize Trades with SL and TP Levels")
 
                 # Filter user_results to only include trades with existing SL and TP
-                user_results_with_sl_tp = trade_analysis_results.dropna(subset=['SL', 'TP'])
+                user_results_with_sl_tp = filtered_results.dropna(subset=['SL', 'TP'])
 
                 if not user_results_with_sl_tp.empty:
                     # Select a trade to visualize
