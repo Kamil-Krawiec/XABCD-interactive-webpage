@@ -19,17 +19,8 @@ class RequestManager:
         # Get today's date
         today = date.today()
 
-        # Determine if today is a weekend (Saturday=5, Sunday=6)
-        is_weekend = today.weekday() >= 5
-
-        # Determine the last trading day
-        if is_weekend:
-            # If today is Saturday (5), subtract one day to get Friday (4)
-            # If today is Sunday (6), subtract two days to get Friday (4)
-            days_since_friday = today.weekday() - 4
-            last_trading_day = today - timedelta(days=days_since_friday)
-        else:
-            last_trading_day = today
+        # Set last trading day to one day before today
+        last_trading_day = today - timedelta(days=1)
 
         # Check if data exists locally
         if os.path.exists(self.cache_path):
@@ -45,18 +36,11 @@ class RequestManager:
                 self.data_cache[symbol] = df
                 return df
             else:
-                if is_weekend:
-                    print("Today is a weekend. Market is closed. Using cached data.")
-                    self.data_cache[symbol] = df
-                    return df
-                else:
-                    print(f"Data is outdated. Last available date: {last_cached_date}. Fetching new data from API...")
+                print(f"Data is outdated. Last available date: {last_cached_date}. Fetching new data from API...")
         else:
-            if is_weekend:
-                print("Today is a weekend and no local data is available. Cannot fetch new data. Returning None.")
-                return None
+            print("No local data is available. Fetching data from API...")
 
-        # Fetch data from the API if local data is outdated or doesn't exist and today is a weekday
+        # Fetch data from the API
         try:
             response = requests.get(
                 f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={self.api_key}"

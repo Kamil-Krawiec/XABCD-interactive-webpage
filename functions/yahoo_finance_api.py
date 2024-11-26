@@ -20,7 +20,6 @@ def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='ca
     Returns:
     - pandas.DataFrame: The historical data with adjusted columns.
     """
-    print(interval)
     if interval is None:
         raise ValueError(f"Unsupported interval: {interval}")
 

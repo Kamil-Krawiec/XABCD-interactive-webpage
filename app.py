@@ -91,7 +91,6 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
         st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
 
-
 def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected):
     """
     Creates and displays a Plotly Candlestick chart with overlaid XABCD patterns.
@@ -192,7 +191,6 @@ def plot_selected_pattern(pattern, candles_left, candles_right):
 
     return fig_plot
 
-
 def main():
     st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
     st.title("Cryptocurrency XABCD Pattern Analyzer")
@@ -214,40 +212,44 @@ def main():
         default=["1d"]
     )
 
-    # Determine the earliest allowed start date based on selected intervals
-    max_days_list = [MAX_REQUESTS_DAYS.get(interval, None) for interval in intervals]
-    max_days_list = [days for days in max_days_list if days is not None]
-
-    if max_days_list:
-        min_days = min(max_days_list)
-        earliest_allowed_date = datetime.utcnow() - timedelta(days=min_days)
-    else:
-        # If no constraints apply, allow any date (e.g., from 2010-01-01)
-        earliest_allowed_date = datetime(2017, 1, 1)
-
-    # User selects start date with constraints
-    start_date = st.sidebar.date_input(
-        "Start Date",
-        value=datetime.utcnow().date(),
-        min_value=earliest_allowed_date.date(),
-        max_value=datetime.utcnow().date()
-    ).strftime("%Y-%m-%d")
-
-    # Let users input thresholds and deltas
+    # Let users input thresholds, deltas, and start dates per interval
     thresholds = {}
     deltas = {}
+    start_dates = {}
     for interval in intervals:
+        st.sidebar.markdown(f"### Settings for Interval: {interval}")
+
+        # Determine the earliest allowed start date based on the interval
+        max_days = MAX_REQUESTS_DAYS.get(interval, None)
+        if max_days is not None:
+            earliest_allowed_date = datetime.utcnow() - timedelta(days=max_days-1)
+        else:
+            earliest_allowed_date = datetime(2017, 1, 1)
+
+        # User selects start date with constraints
+        start_date = st.sidebar.date_input(
+            f"Start Date for {interval}",
+            value=earliest_allowed_date.date(),
+            min_value=earliest_allowed_date.date(),
+            max_value=datetime.utcnow().date(),
+            key=f'start_date_{interval}'
+        ).strftime("%Y-%m-%d")
+        start_dates[interval] = start_date
+
+        # Let users input thresholds and deltas per interval
         default_threshold = DEFAULT_THRESHOLDS.get(interval, 0.04)
         default_delta = DEFAULT_DELTAS.get(interval, 0.1)
         thresholds[interval] = st.sidebar.number_input(
             f"Price percent change for extremes {interval}",
             min_value=0.000, max_value=1.000,
-            value=default_threshold, step=0.001, format="%.3f"
+            value=default_threshold, step=0.001, format="%.3f",
+            key=f'threshold_{interval}'
         )
         deltas[interval] = st.sidebar.number_input(
             f"Formation error allowed for {interval}",
             min_value=0.000, max_value=1.000,
-            value=default_delta, step=0.001, format="%.3f"
+            value=default_delta, step=0.001, format="%.3f",
+            key=f'delta_{interval}'
         )
 
     # Button to fetch data
@@ -261,7 +263,10 @@ def main():
         with st.spinner("Collecting and processing data..."):
             for interval in intervals:
                 for symbol in symbols:
-                    df = process_symbol_interval(symbol, interval, start_date, thresholds[interval], deltas[interval])
+                    start_date = start_dates[interval]
+                    threshold = thresholds[interval]
+                    delta = deltas[interval]
+                    df = process_symbol_interval(symbol, interval, start_date, threshold, delta)
                     if df is not None and not df.empty:
                         all_patterns_df = pd.concat([all_patterns_df, df], ignore_index=True)
 
@@ -295,7 +300,7 @@ def main():
         filtered_df = all_patterns_df[
             (all_patterns_df['symbol'] == symbol_selected) &
             (all_patterns_df['interval'] == interval_selected)
-            ]
+        ]
 
         if not filtered_df.empty:
             # Display the overall patterns DataFrame
@@ -503,7 +508,6 @@ def main():
             st.warning("No patterns available for trade analysis.")
     else:
         st.info("Please fetch data to visualize patterns.")
-
 
 if __name__ == "__main__":
     main()
