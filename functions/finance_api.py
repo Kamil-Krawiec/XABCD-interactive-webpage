@@ -3,16 +3,19 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Mapping input intervals to Binance API intervals
+# Mapping supported intervals to Kraken's minute-based values
 INTERVAL_MAPPING = {
-    '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m',
-    '30m': '30m', '1h': '1h', '2h': '2h', '4h': '4h',
-    '6h': '6h', '12h': '12h', '1d': '1d', '3d': '3d',
-    '1w': '1w', '1M': '1M'
+    '1m': 1,
+    '5m': 5,
+    '15m': 15,
+    '30m': 30,
+    '1h': 60,
+    '4h': 240,
+    '1d': 1440,
+    '1w': 10080,
+    '2w': 20160,
+    '1M': 43200
 }
-
-# Default quote currency for trading pairs
-QUOTE_ASSET = 'USDT'
 
 
 def parse_date(date_input):
@@ -31,7 +34,7 @@ def parse_date(date_input):
 
 def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='cache'):
     """
-    Fetch historical OHLCV data for a crypto asset via Binance public API, with optional caching (no API key required).
+    Fetch historical OHLCV data for a crypto asset via Kraken public API, with optional caching (no API key required).
 
     Parameters:
     - symbol (str): Ticker symbol (e.g., 'BTC').
@@ -47,9 +50,13 @@ def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='ca
     if interval not in INTERVAL_MAPPING:
         raise ValueError(f"Unsupported interval: {interval}. Supported: {list(INTERVAL_MAPPING.keys())}")
 
-    # Prepare dates and cache
+    # Parse dates
     start_dt = parse_date(start_str)
     end_dt = parse_date(end_str) if end_str else datetime.utcnow()
+    if end_dt <= start_dt:
+        raise ValueError("end_str must be after start_str")
+
+    # Prepare cache
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(
         cache_dir,
@@ -58,49 +65,41 @@ def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='ca
     if os.path.exists(cache_file):
         return pd.read_csv(cache_file, parse_dates=['open_time', 'close_time'])
 
-    # Build Binance URL and params
-    pair = f"{symbol.upper()}"
-    url = "https://api.binance.com/api/v3/klines"
+    # Kraken pair formatting: assume USD quote
+    pair = f"X{symbol.upper()}ZUSD" if symbol.upper() == 'BTC' else f"{symbol.upper()}USD"
+    url = "https://api.kraken.com/0/public/OHLC"
     params = {
-        'symbol': pair,
+        'pair': pair,
         'interval': INTERVAL_MAPPING[interval],
-        'startTime': int(start_dt.timestamp() * 1000),
-        'endTime': int(end_dt.timestamp() * 1000),
-        'limit': 1000  # max per request
+        'since': int(start_dt.timestamp())
     }
 
-    # Fetch data (may require paging for >1000 points)
-    all_data = []
-    while True:
-        resp = requests.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        if not data:
-            break
-        all_data.extend(data)
-        # If fewer than limit returned, done
-        if len(data) < params['limit']:
-            break
-        # Else advance startTime to last open time + 1ms
-        last_open = data[-1][0]
-        params['startTime'] = last_open + 1
+    resp = requests.get(url, params=params)
+    resp.raise_for_status()
+    json_data = resp.json()
+    if json_data.get('error'):
+        raise ValueError(f"Kraken API error for {pair}: {json_data['error']}")
 
-    if not all_data:
-        raise ValueError(f"No data returned for {pair} from Binance API.")
+    result_key = next(k for k in json_data['result'].keys() if k != 'last')
+    raw = json_data['result'][result_key]
+    if not raw:
+        raise ValueError(f"No data returned for {pair} from Kraken API.")
 
-    # Parse into DataFrame
-    df = pd.DataFrame(all_data, columns=[
-        'open_time', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'num_trades',
-        'taker_buy_base', 'taker_buy_quote', 'ignore'
+    # Build DataFrame
+    df = pd.DataFrame(raw, columns=[
+        'time', 'open', 'high', 'low', 'close', 'vwap', 'volume', 'count'
     ])
-    df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
-    df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
-    # Convert numeric columns
-    for col in ['open','high','low','close','volume']:
+    # Convert types
+    df['open_time'] = pd.to_datetime(df['time'], unit='s')
+    df['close_time'] = df['open_time'] + pd.to_timedelta(INTERVAL_MAPPING[interval], unit='m')
+    for col in ['open', 'high', 'low', 'close', 'volume']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    result = df[['open_time','open','high','low','close','volume','close_time']].copy()
-    # Cache
+    # Filter time range
+    mask = (df['open_time'] >= start_dt) & (df['open_time'] < end_dt)
+    df = df.loc[mask].reset_index(drop=True)
+
+    result = df[['open_time', 'open', 'high', 'low', 'close', 'volume', 'close_time']]
+    # Cache result
     result.to_csv(cache_file, index=False)
     return result
