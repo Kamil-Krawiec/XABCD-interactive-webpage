@@ -66,7 +66,7 @@ def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='ca
         return pd.read_csv(cache_file, parse_dates=['open_time', 'close_time'])
 
     # Kraken pair formatting: assume USD quote
-    pair = f"X{symbol.upper()}ZUSD" if symbol.upper() == 'BTC' else f"{symbol.upper()}USD"
+    pair = symbol
     url = "https://api.kraken.com/0/public/OHLC"
     params = {
         'pair': pair,
@@ -75,6 +75,7 @@ def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='ca
     }
 
     resp = requests.get(url, params=params)
+    print(resp)
     resp.raise_for_status()
     json_data = resp.json()
     if json_data.get('error'):
