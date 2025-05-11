@@ -13,7 +13,6 @@ ta
 
 # APIs and Requests
 requests==2.31.0
-yfinance
 python-dotenv==1.0.0
 
 # Data Classes and Utilities
