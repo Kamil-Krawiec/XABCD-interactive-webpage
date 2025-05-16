@@ -7,18 +7,18 @@ import joblib
 
 import numpy as np
 from functions import perform_trade_analysis
-from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS, TOP_40_FEATURES, ALL_FEATURES)
+from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS,
+                    TOP_40_FEATURES, ALL_FEATURES)
 from classes import PatternManager
 from functions import get_historical_data
 from functions import get_extremes
 from functions import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 
-
 ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
 # Load trained models and scaler
-clf      = joblib.load("./data/clf_top40.pkl")
-reg_xgb  = joblib.load("./data/reg_xgb_all.pkl")
-scaler   = joblib.load("./data/scaler_all.pkl")
+clf = joblib.load("./data/clf_top40.pkl")
+reg_xgb = joblib.load("./data/reg_xgb_all.pkl")
+scaler = joblib.load("./data/scaler_all.pkl")
 
 
 def process_symbol_interval(symbol, interval, start_date, threshold, delta):
@@ -95,6 +95,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     except Exception as e:
         st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
+
 
 def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected):
     """
@@ -196,6 +197,7 @@ def plot_selected_pattern(pattern, candles_left, candles_right):
 
     return fig_plot
 
+
 def main():
     st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
     st.title("Cryptocurrency XABCD Pattern Analyzer")
@@ -227,7 +229,7 @@ def main():
         # Determine the earliest allowed start date based on the interval
         max_days = MAX_REQUESTS_DAYS.get(interval, None)
         if max_days is not None:
-            earliest_allowed_date = datetime.utcnow() - timedelta(days=max_days-1)
+            earliest_allowed_date = datetime.utcnow() - timedelta(days=max_days - 1)
         else:
             earliest_allowed_date = datetime(2017, 1, 1)
 
@@ -305,7 +307,7 @@ def main():
         filtered_df = all_patterns_df[
             (all_patterns_df['symbol'] == symbol_selected) &
             (all_patterns_df['interval'] == interval_selected)
-        ]
+            ]
 
         if not filtered_df.empty:
             # Display the overall patterns DataFrame
@@ -517,41 +519,45 @@ def main():
                         value=1,
                         step=1
                     )
-                    pattern = filtered_df.iloc[pattern_idx - 1]
-                    st.write(f"Predicting for Pattern {pattern_idx}: **{pattern['pattern_name']}**")
 
-                    # Prepare dummy DataFrame for the selected pattern
-                    df_dummy = pd.DataFrame([pattern])
+                    # ----------------------------------------------------------
+                    if pattern_idx is not None:
+                        pattern_row = filtered_df.iloc[[pattern_idx - 1]].reset_index(drop=True)
+                        st.write(f"Predicting for Pattern {pattern_idx}: **{pattern_row['pattern_name'].iloc[0]}**")
+                        # 1.  Figure out column lists for each model
+                        df_dummy = pd.get_dummies(pattern_row, drop_first=True)
 
-                    # Split out the features for each model
-                    pattern_for_classification = df_dummy[[x for x in TOP_40_FEATURES if x in df_dummy.columns] ]
-                    pattern_for_regression = df_dummy[[x for x in ALL_FEATURES if x in df_dummy.columns]]
+                        # 3.  Align
+                        feat_for_clf = clf.get_booster().feature_names
+                        feat_for_reg = ALL_FEATURES
 
-                    # Model predictions
-                    prob_success = clf.predict_proba(pattern_for_classification)[0, 1]
-                    profit_xgb = reg_xgb.predict(scaler.transform(pattern_for_regression))[0]
-                    profit_rf = reg_rf.predict(scaler.transform(pattern_for_regression))[0]
+                        X_clf_dummy = df_dummy[[x for x in feat_for_clf if x in df_dummy.columns]].reindex(
+                            columns=feat_for_clf, fill_value=0)
+                        X_reg_dummy = df_dummy[[x for x in feat_for_reg if x in df_dummy.columns]].reindex(
+                            columns=feat_for_reg, fill_value=0)
 
-                    # Display results with metrics
-                    st.subheader("Ad-Hoc Prediction Results")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Success Probability", f"{prob_success:.2%}")
-                    col2.metric("Predicted Profit (XGB)", f"{profit_xgb:.4f}")
-                    col3.metric("Predicted Profit (RF)", f"{profit_rf:.4f}")
+                        # 4.  Predict
+                        prob_success = clf.predict_proba(X_clf_dummy)[0, 1] * 100
+                        profit_xgb = reg_xgb.predict(scaler.transform(X_reg_dummy))[0] * 100
 
-                    # Visualize results in a grouped bar chart
-                    fig_pred = go.Figure(data=[
-                        go.Bar(name="Success Probability", x=[""], y=[prob_success]),
-                        go.Bar(name="Profit XGB", x=[""], y=[profit_xgb]),
-                        go.Bar(name="Profit RF", x=[""], y=[profit_rf]),
-                    ])
-                    fig_pred.update_layout(
-                        title="Pattern Prediction Metrics",
-                        yaxis_title="Value",
-                        barmode="group",
-                        height=400
-                    )
-                    st.plotly_chart(fig_pred, use_container_width=True)
+                        # 5.  Display
+                        st.subheader("Ad-Hoc Prediction Results")
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Success Probability", f"{prob_success:.2}%")
+                        c2.metric("Predicted Profit (XGB)", f"{profit_xgb:.4f}%")
+
+                        fig_pred = go.Figure([
+                            go.Bar(name="Success Probability", x=[""], y=[prob_success]),
+                            go.Bar(name="Profit XGB", x=[""], y=[profit_xgb]),
+                        ])
+                        fig_pred.update_layout(
+                            title="Pattern Prediction Metrics",
+                            yaxis_title="Value",
+                            barmode="group",
+                            height=400
+                        )
+                        st.plotly_chart(fig_pred, use_container_width=True)
+                    # ----------------------------------------------------------
                 else:
                     st.warning("No trades with SL and TP available for visualization.")
             else:
@@ -560,6 +566,7 @@ def main():
             st.warning("No patterns available for trade analysis_outcomes.")
     else:
         st.info("Please fetch data to visualize patterns.")
+
 
 if __name__ == "__main__":
     main()
