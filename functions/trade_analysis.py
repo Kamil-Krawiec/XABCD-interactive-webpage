@@ -23,7 +23,7 @@ logging.basicConfig(
 
 def perform_trade_analysis( patterns_df, ohlc_data_dict):
     """
-    Performs trade analysis on the given patterns DataFrame.
+    Performs trade analysis_outcomes on the given patterns DataFrame.
 
     Parameters:
     - client: Binance Client instance.
@@ -31,7 +31,7 @@ def perform_trade_analysis( patterns_df, ohlc_data_dict):
     - ohlc_data_dict: Dictionary containing OHLC data for symbols and intervals.
 
     Returns:
-    - DataFrame with trade analysis results.
+    - DataFrame with trade analysis_outcomes results.
     """
     # Dictionary to store the results for each interval
     interval_results = []

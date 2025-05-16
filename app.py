@@ -3,10 +3,11 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import joblib
 
-
+import numpy as np
 from functions import perform_trade_analysis
-from config import DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS
+from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS, TOP_40_FEATURES, ALL_FEATURES)
 from classes import PatternManager
 from functions import get_historical_data
 from functions import get_extremes
@@ -14,6 +15,10 @@ from functions import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 
 
 ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
+# Load trained models and scaler
+clf      = joblib.load("./data/clf_top40.pkl")
+reg_xgb  = joblib.load("./data/reg_xgb_all.pkl")
+scaler   = joblib.load("./data/scaler_all.pkl")
 
 
 def process_symbol_interval(symbol, interval, start_date, threshold, delta):
@@ -373,28 +378,28 @@ def main():
 
             # Define a form to prevent page jumps
             with st.form(key='trade_analysis_form'):
-                # Button to perform trade analysis
+                # Button to perform trade analysis_outcomes
                 perform_trade_analysis_button = st.form_submit_button("Perform Trade Analysis")
 
             if perform_trade_analysis_button:
-                with st.spinner("Performing trade analysis..."):
+                with st.spinner("Performing trade analysis_outcomes..."):
                     try:
                         # Retrieve the stored OHLC data from session state
                         ohlc_data_dict = st.session_state['ohlc_data_dict']
 
-                        # Perform trade analysis using existing OHLC data
+                        # Perform trade analysis_outcomes using existing OHLC data
                         trade_analysis_results = perform_trade_analysis(all_patterns_df, ohlc_data_dict)
 
                         if not trade_analysis_results.empty:
-                            st.success("Trade analysis completed successfully.")
+                            st.success("Trade analysis_outcomes completed successfully.")
                             st.session_state['trade_analysis_results'] = trade_analysis_results
                         else:
-                            st.warning("No trade analysis results available.")
+                            st.warning("No trade analysis_outcomes results available.")
 
                     except Exception as e:
-                        st.error(f"An error occurred during trade analysis: {e}")
+                        st.error(f"An error occurred during trade analysis_outcomes: {e}")
 
-            # Display trade analysis results if available
+            # Display trade analysis_outcomes results if available
             if 'trade_analysis_results' in st.session_state:
                 trade_analysis_results = st.session_state['trade_analysis_results']
 
@@ -500,12 +505,59 @@ def main():
                             st.pyplot(fig)
                         else:
                             st.error("Failed to generate the plot for the selected trade.")
+
+                    # --- Pattern Prediction Section ---
+                    st.header("Pattern Prediction")
+
+                    # Select a single pattern for ad-hoc prediction
+                    pattern_idx = st.number_input(
+                        "Select Pattern Number to Predict",
+                        min_value=1,
+                        max_value=len(filtered_df),
+                        value=1,
+                        step=1
+                    )
+                    pattern = filtered_df.iloc[pattern_idx - 1]
+                    st.write(f"Predicting for Pattern {pattern_idx}: **{pattern['pattern_name']}**")
+
+                    # Prepare dummy DataFrame for the selected pattern
+                    df_dummy = pd.DataFrame([pattern])
+
+                    # Split out the features for each model
+                    pattern_for_classification = df_dummy[[x for x in TOP_40_FEATURES if x in df_dummy.columns] ]
+                    pattern_for_regression = df_dummy[[x for x in ALL_FEATURES if x in df_dummy.columns]]
+
+                    # Model predictions
+                    prob_success = clf.predict_proba(pattern_for_classification)[0, 1]
+                    profit_xgb = reg_xgb.predict(scaler.transform(pattern_for_regression))[0]
+                    profit_rf = reg_rf.predict(scaler.transform(pattern_for_regression))[0]
+
+                    # Display results with metrics
+                    st.subheader("Ad-Hoc Prediction Results")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Success Probability", f"{prob_success:.2%}")
+                    col2.metric("Predicted Profit (XGB)", f"{profit_xgb:.4f}")
+                    col3.metric("Predicted Profit (RF)", f"{profit_rf:.4f}")
+
+                    # Visualize results in a grouped bar chart
+                    fig_pred = go.Figure(data=[
+                        go.Bar(name="Success Probability", x=[""], y=[prob_success]),
+                        go.Bar(name="Profit XGB", x=[""], y=[profit_xgb]),
+                        go.Bar(name="Profit RF", x=[""], y=[profit_rf]),
+                    ])
+                    fig_pred.update_layout(
+                        title="Pattern Prediction Metrics",
+                        yaxis_title="Value",
+                        barmode="group",
+                        height=400
+                    )
+                    st.plotly_chart(fig_pred, use_container_width=True)
                 else:
                     st.warning("No trades with SL and TP available for visualization.")
             else:
-                st.warning("Please perform trade analysis to view results.")
+                st.warning("Please perform trade analysis_outcomes to view results.")
         else:
-            st.warning("No patterns available for trade analysis.")
+            st.warning("No patterns available for trade analysis_outcomes.")
     else:
         st.info("Please fetch data to visualize patterns.")
 
