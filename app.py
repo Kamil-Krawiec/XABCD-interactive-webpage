@@ -1,24 +1,24 @@
-# app.py
+from datetime import datetime, timedelta
+
+import joblib
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import joblib
 
 import numpy as np
 from functions import perform_trade_analysis
-from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS, TOP_40_FEATURES, ALL_FEATURES)
+from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS,
+                    TOP_40_FEATURES, ALL_FEATURES)
 from classes import PatternManager
 from functions import get_historical_data
 from functions import get_extremes
 from functions import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 
-
+# Load API key and models
 ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
-# Load trained models and scaler
-clf      = joblib.load("./data/clf_top40.pkl")
-reg_xgb  = joblib.load("./data/reg_xgb_all.pkl")
-scaler   = joblib.load("./data/scaler_all.pkl")
+clf = joblib.load("./data/clf_top40.pkl")
+reg_xgb = joblib.load("./data/reg_xgb_all.pkl")
+scaler = joblib.load("./data/scaler_all.pkl")
 
 
 def process_symbol_interval(symbol, interval, start_date, threshold, delta):
@@ -29,8 +29,8 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     - symbol (str): Cryptocurrency symbol (e.g., 'BTCUSDT').
     - interval (str): Time interval (e.g., '1d', '4h').
     - start_date (str): Start date for historical data in 'YYYY-MM-DD' format.
-    - threshold (float): Threshold value for extreme point detection.
-    - delta (float): Delta value for pattern detection.
+    - threshold (float): Minimum relative price change (decimal) to identify an extreme high or low (e.g., 0.05 = 5%). Higher values filter out smaller swings.
+    - delta (float): Maximum allowed deviation (decimal) from ideal Fibonacci ratios when validating XABCD pattern legs. Smaller values enforce stricter pattern fit.
 
     Returns:
     - pd.DataFrame or None: DataFrame containing detected patterns or None if no patterns found.
@@ -95,6 +95,7 @@ def process_symbol_interval(symbol, interval, start_date, threshold, delta):
     except Exception as e:
         st.error(f"Error processing {symbol} on {interval}: {e}")
         return None
+
 
 def create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected):
     """
@@ -196,370 +197,188 @@ def plot_selected_pattern(pattern, candles_left, candles_right):
 
     return fig_plot
 
+
+def render_prediction_section(filtered_df: pd.DataFrame):
+    """
+    Renders the Pattern Prediction section in the Streamlit app.
+
+    Parameters:
+    - filtered_df: DataFrame of detected XABCD patterns for the current symbol/interval.
+    - symbol: the cryptocurrency symbol being analyzed.
+    - interval: the time interval of the patterns.
+    """
+    st.header("Pattern Prediction")
+
+    # 1) Bail early if no patterns
+    if filtered_df.empty:
+        st.info("No patterns available for prediction.")
+        return
+
+    # 2) Build descriptive labels
+    df = filtered_df.reset_index(drop=True)
+    options = [f"{i + 1}: {row['pattern_name']} @ {row['X_time']}" for i, row in df.iterrows()]
+
+    # 3) User selects pattern
+    choice = st.selectbox("Select Pattern to Predict", options, key="pattern_pred_select")
+    idx = int(choice.split(":")[0]) - 1
+    row = df.iloc[[idx]]
+
+    st.subheader(f"Ad-Hoc Prediction for Pattern {idx + 1}: {row['pattern_name'].iloc[0]}")
+
+    # 4) Feature engineering
+    df_dummy = pd.get_dummies(row, drop_first=True)
+    Xc = df_dummy.reindex(columns=clf.get_booster().feature_names, fill_value=0)
+    Xr = df_dummy.reindex(columns=ALL_FEATURES, fill_value=0)
+
+    # 5) Make predictions
+    prob_success = clf.predict_proba(Xc)[0, 1] * 100
+    profit_xgb = reg_xgb.predict(scaler.transform(Xr))[0] * 100
+
+    # 6) Display metrics side by side
+    c1, c2 = st.columns(2)
+    c1.metric("🏆 Success Probability", f"{prob_success:.2f}%")
+    c2.metric("💰 Predicted Profit", f"{profit_xgb:.2f}%")
+
+    # 7) Plot prediction chart with SL/TP overlay
+    with st.expander("Show Prediction Chart", expanded=True):
+        # Extract symbol and interval from the selected pattern row
+        pat = row.iloc[0]
+        sym = pat['symbol']
+        iv = pat['interval']
+        # Retrieve stored OHLC for this symbol/interval
+        ohlc = st.session_state['ohlc_data_dict'].get((sym, iv))
+        if ohlc is None or ohlc.empty:
+            st.error("OHLC data unavailable for this pattern.")
+        else:
+            # Prepare OHLC index
+            df_ohlc = ohlc.copy()
+            df_ohlc['open_time'] = pd.to_datetime(df_ohlc['open_time'])
+            df_ohlc.set_index('open_time', inplace=True)
+            # Determine candle window using INTERVAL_PARAMETERS
+            left = 10
+            right = 10
+            # Plot using your SL/TP overlay helper
+            fig = plot_xabcd_patterns_with_sl_tp(
+                pattern=pat,
+                ohlc=df_ohlc,
+                candles_left=left,
+                candles_right=right
+            )
+            st.pyplot(fig)
+
 def main():
     st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
     st.title("Cryptocurrency XABCD Pattern Analyzer")
 
-    # --- Sidebar Configuration ---
+    # --- Session state init ---
+    st.session_state.setdefault('ohlc_data_dict', {})
+    st.session_state.setdefault('patterns_df', pd.DataFrame())
+    st.session_state.setdefault('trade_results', pd.DataFrame())
+
+    # --- Sidebar config ---
     st.sidebar.header("Configuration")
-
-    # User selects symbols
     symbols = st.sidebar.multiselect(
-        "Select Symbols",
-        ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ETHBTC", "SOLUSDT"],
-        default=["BTCUSDT"]
+        "Symbols", ["BTCUSDT","ETHUSDT","BNBUSDT","ETHBTC","SOLUSDT"], default=["BTCUSDT"]
     )
-
-    # User selects intervals
     intervals = st.sidebar.multiselect(
-        "Select Intervals",
-        ["1wk", "1d", "1h", "30m"],
-        default=["1d"]
+        "Intervals", ["1wk","1d","1h","30m"], default=["1d"]
     )
 
-    # Let users input thresholds, deltas, and start dates per interval
-    thresholds = {}
-    deltas = {}
-    start_dates = {}
-    for interval in intervals:
-        st.sidebar.markdown(f"### Settings for Interval: {interval}")
-
-        # Determine the earliest allowed start date based on the interval
-        max_days = MAX_REQUESTS_DAYS.get(interval, None)
-        if max_days is not None:
-            earliest_allowed_date = datetime.utcnow() - timedelta(days=max_days-1)
-        else:
-            earliest_allowed_date = datetime(2017, 1, 1)
-
-        # User selects start date with constraints
-        start_date = st.sidebar.date_input(
-            f"Start Date for {interval}",
-            value=earliest_allowed_date.date(),
-            min_value=earliest_allowed_date.date(),
-            max_value=datetime.utcnow().date(),
-            key=f'start_date_{interval}'
-        ).strftime("%Y-%m-%d")
-        start_dates[interval] = start_date
-
-        # Let users input thresholds and deltas per interval
-        default_threshold = DEFAULT_THRESHOLDS.get(interval, 0.04)
-        default_delta = DEFAULT_DELTAS.get(interval, 0.1)
-        thresholds[interval] = st.sidebar.number_input(
-            f"Price percent change for extremes {interval}",
-            min_value=0.000, max_value=1.000,
-            value=default_threshold, step=0.001, format="%.3f",
-            key=f'threshold_{interval}'
+    thresholds, deltas, start_dates = {}, {}, {}
+    for iv in intervals:
+        st.sidebar.markdown(f"### {iv} Settings")
+        max_days = MAX_REQUESTS_DAYS.get(iv)
+        earliest = datetime.utcnow() - timedelta(days=(max_days - 1) if max_days else 3650)
+        date_input = st.sidebar.date_input(
+            "Start Date", value=earliest.date(), min_value=earliest.date(), max_value=datetime.utcnow().date(), key=f"start_{iv}"
         )
-        deltas[interval] = st.sidebar.number_input(
-            f"Formation error allowed for {interval}",
-            min_value=0.000, max_value=1.000,
-            value=default_delta, step=0.001, format="%.3f",
-            key=f'delta_{interval}'
+        start_dates[iv] = date_input.strftime('%Y-%m-%d')
+        thresholds[iv] = st.sidebar.number_input(
+            "Threshold-Minimum relative price change (decimal) to identify an extreme high or low (e.g., 0.05 = 5%). Higher values filter out smaller swings. ", 0.0, 1.0, DEFAULT_THRESHOLDS.get(iv, 0.04), 0.001, key=f"th_{iv}"
+        )
+        deltas[iv] = st.sidebar.number_input(
+            "Delta-Maximum allowed deviation (decimal) from ideal Fibonacci ratios when validating XABCD pattern legs. Smaller values enforce stricter pattern fit.", 0.0, 1.0, DEFAULT_DELTAS.get(iv, 0.1), 0.001, key=f"dl_{iv}"
         )
 
-    # Button to fetch data
-    if st.sidebar.button("Fetch and Analyze"):
-        if not symbols or not intervals:
-            st.error("Please select at least one symbol and one interval.")
-            st.stop()
-
-        all_patterns_df = pd.DataFrame()
-
-        with st.spinner("Collecting and processing data..."):
-            for interval in intervals:
-                for symbol in symbols:
-                    start_date = start_dates[interval]
-                    threshold = thresholds[interval]
-                    delta = deltas[interval]
-                    df = process_symbol_interval(symbol, interval, start_date, threshold, delta)
+    # --- Fetch & analyze patterns ---
+    if st.sidebar.button("Fetch & Analyze"):
+        all_patterns = []
+        with st.spinner("Detecting patterns..."):
+            for iv in intervals:
+                for sym in symbols:
+                    df = process_symbol_interval(sym, iv, start_dates[iv], thresholds[iv], deltas[iv])
                     if df is not None and not df.empty:
-                        all_patterns_df = pd.concat([all_patterns_df, df], ignore_index=True)
-
-        if not all_patterns_df.empty:
-            # Save the master DataFrame to session state
-            st.success(f"Successfully gathered and processed data.")
-            st.session_state['all_patterns_df'] = all_patterns_df
+                        all_patterns.append(df)
+        if all_patterns:
+            st.success("Patterns detected successfully.")
+            st.session_state['patterns_df'] = pd.concat(all_patterns, ignore_index=True)
         else:
-            st.error("No patterns were found for the selected configuration.")
+            st.error("No patterns found.")
 
-    # --- Main Content ---
-    if 'all_patterns_df' in st.session_state:
-        all_patterns_df = st.session_state['all_patterns_df']
+    # --- Display patterns ---
+    df_patterns = st.session_state['patterns_df']
+    if df_patterns.empty:
+        st.info("Click 'Fetch & Analyze' to detect patterns.")
+        return
 
-        # --- Part 1: Overall Patterns ---
-        st.header("Overall Patterns")
-
-        # User selects a symbol and interval for visualization
-        symbol_selected = st.selectbox(
-            "Select Symbol for Visualization",
-            all_patterns_df['symbol'].unique(),
-            key='symbol_select'
-        )
-        interval_selected = st.selectbox(
-            "Select Interval for Visualization",
-            all_patterns_df['interval'].unique(),
-            key='interval_select'
-        )
-
-        # Filter patterns for selected symbol and interval
-        filtered_df = all_patterns_df[
-            (all_patterns_df['symbol'] == symbol_selected) &
-            (all_patterns_df['interval'] == interval_selected)
-        ]
-
-        if not filtered_df.empty:
-            # Display the overall patterns DataFrame
-            st.dataframe(filtered_df)
-
-            # Visualize all patterns on candlestick chart
-            create_candlestick_with_patterns(filtered_df, symbol_selected, interval_selected)
-        else:
-            st.warning("No patterns available for the selected symbol and interval.")
-
-        # --- Part 2: Detailed View of Single Pattern ---
-        st.header("Detailed View of Single Pattern")
-
-        if not filtered_df.empty:
-            # Define a form to group the inputs and the button
-            with st.form(key='detailed_view_form'):
-                # List of patterns to select from
-                pattern_options = [
-                    f"Pattern {i + 1}: {row['pattern_name']} on {row['X_time']}"
-                    for i, row in filtered_df.iterrows()
-                ]
-
-                selected_option = st.selectbox(
-                    "Select a Pattern to View",
-                    options=pattern_options,
-                    key='selected_pattern'
-                )
-
-                # Input fields for candles_left and candles_right
-                candles_left = st.number_input(
-                    "Candles to display before the pattern (Left)",
-                    min_value=1, max_value=100, value=10,
-                    key='candles_left'
-                )
-                candles_right = st.number_input(
-                    "Candles to display after the pattern (Right)",
-                    min_value=1, max_value=100, value=10,
-                    key='candles_right'
-                )
-
-                # Submit button for the form
-                submit_button = st.form_submit_button(label='View Selected Pattern')
-
-            # After form submission
-            if submit_button:
-                selected_index = pattern_options.index(selected_option)
-                try:
-                    # Retrieve the selected pattern
-                    pattern = filtered_df.iloc[selected_index].to_dict()
-
-                    # Fetch the corresponding OHLC data and plot
-                    fig_plot = plot_selected_pattern(pattern, candles_left, candles_right)
-
-                    # Display the plot
-                    st.pyplot(fig_plot)
-                except Exception as e:
-                    st.error(f"Error viewing selected pattern: {e}")
-
-        # --- Part 3: Trade Analysis ---
-        st.header("Trade Analysis with Optimized Parameters")
-
-        # Check if patterns are available
-        if 'all_patterns_df' in st.session_state:
-            all_patterns_df = st.session_state['all_patterns_df']
-
-            # Ensure that OHLC data is stored in session state
-            if 'ohlc_data_dict' not in st.session_state:
-                st.error("OHLC data not found in session state. Please run pattern detection first.")
-                st.stop()
-
-            # Define a form to prevent page jumps
-            with st.form(key='trade_analysis_form'):
-                # Button to perform trade analysis_outcomes
-                perform_trade_analysis_button = st.form_submit_button("Perform Trade Analysis")
-
-            if perform_trade_analysis_button:
-                with st.spinner("Performing trade analysis_outcomes..."):
-                    try:
-                        # Retrieve the stored OHLC data from session state
-                        ohlc_data_dict = st.session_state['ohlc_data_dict']
-
-                        # Perform trade analysis_outcomes using existing OHLC data
-                        trade_analysis_results = perform_trade_analysis(all_patterns_df, ohlc_data_dict)
-
-                        if not trade_analysis_results.empty:
-                            st.success("Trade analysis_outcomes completed successfully.")
-                            st.session_state['trade_analysis_results'] = trade_analysis_results
-                        else:
-                            st.warning("No trade analysis_outcomes results available.")
-
-                    except Exception as e:
-                        st.error(f"An error occurred during trade analysis_outcomes: {e}")
-
-            # Display trade analysis_outcomes results if available
-            if 'trade_analysis_results' in st.session_state:
-                trade_analysis_results = st.session_state['trade_analysis_results']
-
-                # --- Add Filters ---
-                st.subheader("Filter Trade Analysis Results")
-
-                # Create a multiselect for 'symbol'
-                symbols = trade_analysis_results['symbol'].unique()
-                selected_symbols = st.multiselect(
-                    "Select Symbols to Display",
-                    options=symbols,
-                    default=symbols
-                )
-
-                # Create a multiselect for 'exit_reason'
-                exit_reasons = trade_analysis_results['exit_reason'].unique()
-                selected_exit_reasons = st.multiselect(
-                    "Select Exit Reasons to Display",
-                    options=exit_reasons,
-                    default=exit_reasons
-                )
-
-                # Checkbox to filter profitable trades
-                show_profitable = st.checkbox("Show Profitable Trades Only", value=False)
-
-                # Apply filters to the DataFrame
-                filtered_results = trade_analysis_results.copy()
-
-                if selected_symbols:
-                    filtered_results = filtered_results[filtered_results['symbol'].isin(selected_symbols)]
-                else:
-                    st.warning("No symbols selected. Displaying all trades.")
-
-                if selected_exit_reasons:
-                    filtered_results = filtered_results[filtered_results['exit_reason'].isin(selected_exit_reasons)]
-                else:
-                    st.warning("No exit reasons selected. Displaying all trades.")
-
-                if show_profitable:
-                    filtered_results = filtered_results[filtered_results['profit'] > 0]
-
-                # Select only INTERESTING_COLUMNS
-                user_results = filtered_results[INTERESTING_COLUMNS]
-
-                # Display the DataFrame
-                st.subheader("Filtered Trade Analysis Results")
-                st.dataframe(user_results)
-
-                # Visualization of Trades
-                st.subheader("Visualize Trades with SL and TP Levels")
-
-                # Filter user_results to only include trades with existing SL and TP
-                user_results_with_sl_tp = filtered_results.dropna(subset=['SL', 'TP'])
-
-                if not user_results_with_sl_tp.empty:
-                    # Select a trade to visualize
-                    trade_options = [
-                        f"Trade {i + 1}: {row['symbol']} on {row['D_time']} ({'Profit' if row['profit'] > 0 else 'Loss'})"
-                        for i, row in user_results_with_sl_tp.reset_index().iterrows()
-                    ]
-
-                    # Define a form to prevent page jumps when selecting trades
-                    with st.form(key='trade_visualization_form'):
-                        selected_trade_option = st.selectbox(
-                            "Select a Trade to Visualize",
-                            options=trade_options,
-                            key='selected_trade'
-                        )
-                        visualize_trade_button = st.form_submit_button("Visualize Trade")
-
-                    if visualize_trade_button:
-                        selected_trade_index = trade_options.index(selected_trade_option)
-                        selected_trade = user_results_with_sl_tp.reset_index().iloc[selected_trade_index]
-
-                        # Use stored OHLC data
-                        symbol = selected_trade['symbol']
-                        interval = selected_trade['interval']
-                        key = (symbol, interval)
-
-                        if key in st.session_state['ohlc_data_dict']:
-                            ohlc_data = st.session_state['ohlc_data_dict'][key].copy()
-                        else:
-                            st.error(f"OHLC data for {symbol} on {interval} not found.")
-                            st.stop()
-
-                        ohlc_data['open_time'] = pd.to_datetime(ohlc_data['open_time'])
-                        ohlc_data.set_index('open_time', inplace=True)
-                        ohlc_data.sort_index(inplace=True)
-
-                        # Prepare the data for plotting
-                        candles_left = 2
-                        candles_right = INTERVAL_PARAMETERS[interval][5] + 1
-
-                        # Plot the trade using your plotting function
-                        fig = plot_xabcd_patterns_with_sl_tp(
-                            pattern=selected_trade,
-                            ohlc=ohlc_data,
-                            candles_left=candles_left,
-                            candles_right=candles_right
-                        )
-
-                        if fig:
-                            st.pyplot(fig)
-                        else:
-                            st.error("Failed to generate the plot for the selected trade.")
-
-                    # --- Pattern Prediction Section ---
-                    st.header("Pattern Prediction")
-
-                    # Select a single pattern for ad-hoc prediction
-                    pattern_idx = st.number_input(
-                        "Select Pattern Number to Predict",
-                        min_value=1,
-                        max_value=len(filtered_df),
-                        value=1,
-                        step=1
-                    )
-                    pattern = filtered_df.iloc[pattern_idx - 1]
-                    st.write(f"Predicting for Pattern {pattern_idx}: **{pattern['pattern_name']}**")
-
-                    # Prepare dummy DataFrame for the selected pattern
-                    df_dummy = pd.DataFrame([pattern])
-
-                    # Split out the features for each model
-                    pattern_for_classification = df_dummy[[x for x in TOP_40_FEATURES if x in df_dummy.columns] ]
-                    pattern_for_regression = df_dummy[[x for x in ALL_FEATURES if x in df_dummy.columns]]
-
-                    # Model predictions
-                    prob_success = clf.predict_proba(pattern_for_classification)[0, 1]
-                    profit_xgb = reg_xgb.predict(scaler.transform(pattern_for_regression))[0]
-                    profit_rf = reg_rf.predict(scaler.transform(pattern_for_regression))[0]
-
-                    # Display results with metrics
-                    st.subheader("Ad-Hoc Prediction Results")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Success Probability", f"{prob_success:.2%}")
-                    col2.metric("Predicted Profit (XGB)", f"{profit_xgb:.4f}")
-                    col3.metric("Predicted Profit (RF)", f"{profit_rf:.4f}")
-
-                    # Visualize results in a grouped bar chart
-                    fig_pred = go.Figure(data=[
-                        go.Bar(name="Success Probability", x=[""], y=[prob_success]),
-                        go.Bar(name="Profit XGB", x=[""], y=[profit_xgb]),
-                        go.Bar(name="Profit RF", x=[""], y=[profit_rf]),
-                    ])
-                    fig_pred.update_layout(
-                        title="Pattern Prediction Metrics",
-                        yaxis_title="Value",
-                        barmode="group",
-                        height=400
-                    )
-                    st.plotly_chart(fig_pred, use_container_width=True)
-                else:
-                    st.warning("No trades with SL and TP available for visualization.")
-            else:
-                st.warning("Please perform trade analysis_outcomes to view results.")
-        else:
-            st.warning("No patterns available for trade analysis_outcomes.")
+    st.header("Overall Patterns")
+    symbol = st.selectbox("Select Symbol", df_patterns['symbol'].unique())
+    interval = st.selectbox("Select Interval", df_patterns['interval'].unique())
+    df_sel = df_patterns[(df_patterns.symbol == symbol) & (df_patterns.interval == interval)]
+    if df_sel.empty:
+        st.warning("No patterns for this selection.")
     else:
-        st.info("Please fetch data to visualize patterns.")
+        st.dataframe(df_sel)
+        create_candlestick_with_patterns(df_sel, symbol, interval)
+    # --- Trade Analysis Trigger ---
+    if st.button("Run Trade Analysis"):
+        trades = perform_trade_analysis(df_patterns, st.session_state['ohlc_data_dict'])
+        if trades is not None and not trades.empty:
+            st.success("Trade analysis complete.")
+            st.session_state['trade_results'] = trades
+        else:
+            st.warning("No trade outcomes.")
+
+    # --- Trade Filters & Visualization (always shown once analysis has run) ---
+    df_trades = st.session_state.get('trade_results', pd.DataFrame())
+    if not df_trades.empty:
+        st.subheader("Filter Trades")
+        syms = df_trades.symbol.unique().tolist()
+        exrs = df_trades.exit_reason.unique().tolist()
+        f_sym = st.multiselect("Symbols", syms, default=syms)
+        f_exr = st.multiselect("Exit Reasons", exrs, default=exrs)
+        prof = st.checkbox("Profitable only")
+        df_f = df_trades[
+            df_trades.symbol.isin(f_sym) &
+            df_trades.exit_reason.isin(f_exr)
+            ]
+        if prof:
+            df_f = df_f[df_f.profit > 0]
+
+        st.dataframe(df_f[INTERESTING_COLUMNS])
+
+        # Visualize a trade
+        sltp = df_f.dropna(subset=['SL', 'TP'])
+        if not sltp.empty:
+            st.subheader("Visualize Trade")
+            opts = [
+                f"{i + 1}: {r.symbol}@{r.D_time} ({r.profit:.2f}%)"
+                for i, r in sltp.reset_index().iterrows()
+            ]
+            choice = st.selectbox("Select Trade", opts, key="trade_to_plot")
+            idx = int(choice.split(":")[0]) - 1
+            trade = sltp.reset_index().iloc[idx]
+
+            ohlc = st.session_state['ohlc_data_dict'][(trade.symbol, trade.interval)].copy()
+            ohlc['open_time'] = pd.to_datetime(ohlc['open_time'])
+            ohlc.set_index('open_time', inplace=True)
+            left, right = 2, INTERVAL_PARAMETERS[trade.interval][5] + 1
+            fig = plot_xabcd_patterns_with_sl_tp(trade, ohlc, left, right)
+            st.pyplot(fig)
+
+        # --- Pattern Prediction (always shown too) ---
+        render_prediction_section(sltp)
+
 
 if __name__ == "__main__":
     main()

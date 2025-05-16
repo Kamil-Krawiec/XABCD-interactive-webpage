@@ -122,13 +122,8 @@ BB_lower_at_D,169
 BB_upper_at_D,167
 type_vs_regime_Bullish_Down,162
 D_hour_bin_6-11,160
-rand_feat_2,160
-rand_feat_1,153
 delta,150
-rand_feat_5,150
 D_hour_bin_18-23,142
-rand_feat_3,137
-rand_feat_4,119
 BB_lower_at_C,110
 type_vs_regime_Bearish_Up,110
 Ichimoku_Tenkan_Sen_at_C,109

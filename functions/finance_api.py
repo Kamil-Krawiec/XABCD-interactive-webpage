@@ -75,7 +75,6 @@ def get_historical_data(symbol, interval, start_str, end_str=None, cache_dir='ca
     }
 
     resp = requests.get(url, params=params)
-    print(resp)
     resp.raise_for_status()
     json_data = resp.json()
     if json_data.get('error'):

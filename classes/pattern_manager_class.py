@@ -186,7 +186,7 @@ class PatternManager:
         self.pattern_df['symbol'] = self.symbol
         self.pattern_df['interval'] = self.interval
 
-        self.pattern_df = self.engineer_features(self.pattern_df)
+        self.engineer_features()
         return self.pattern_df
 
     @staticmethod
@@ -196,32 +196,59 @@ class PatternManager:
         if hour < 18: return '12-17'
         return '18-23'
 
-    def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['SP500_at_X'] = df['X_time'].apply(lambda t: self.request_extractor.get_SP500_index_at_time('SPY', t))
+    def engineer_features(self) -> pd.DataFrame:
+        """
+        Populate self.pattern_df with engineered features in place.
+        """
+        df = self.pattern_df
+
+        # SP500 features
+        df['SP500_at_X'] = df['X_time'].apply(
+            lambda t: self.request_extractor.get_SP500_index_at_time('SPY', t)
+        )
         df['SP500_at_D'] = df['pattern_end_time'].apply(
-            lambda t: self.request_extractor.get_SP500_index_at_time('SPY', t))
+            lambda t: self.request_extractor.get_SP500_index_at_time('SPY', t)
+        )
         df['SP500_diff'] = df['SP500_at_D'] - df['SP500_at_X']
 
+        # Body and return
         df['D_body'] = df['close_price_at_D'] - df['open_price_at_D']
         df['D_return'] = df['D_body'] / df['open_price_at_D']
         df['D_body_dir'] = np.where(df['D_body'] > 0, 'Up', 'Down')
 
-        df['D_vol_spike'] = (df['volume_at_D'] > 1.5 * df['Volume_MA_20_at_D']).astype(int)
+        # Volume spike
+        df['D_vol_spike'] = (
+                df['volume_at_D'] > 1.5 * df['Volume_MA_20_at_D']
+        ).astype(int)
 
-        for col in ['ratio_AB_XA', 'ratio_BC_AB', 'ratio_CD_BC', 'ratio_AD_XA',
-                    'pattern_duration', 'duration_XA', 'duration_AB', 'duration_BC', 'duration_CD']:
+        # Quantile bins for ratios and durations
+        for col in ['ratio_AB_XA', 'ratio_BC_AB', 'ratio_CD_BC', 'ratio_AD_XA']:
+            df[f'{col}_bin'] = pd.qcut(df[col], q=4, labels=False, duplicates='drop')
+        for col in ['pattern_duration', 'duration_XA', 'duration_AB', 'duration_BC', 'duration_CD']:
             df[f'{col}_bin'] = pd.qcut(df[col], q=4, labels=False, duplicates='drop')
 
+        # Bollinger Band region
         df['BB_region_at_D'] = np.select(
-            [df['close_price_at_D'] < df['BB_lower_at_D'], df['close_price_at_D'] > df['BB_upper_at_D']],
-            ['Below_Lower', 'Above_Upper'], default='Inside')
+            [df['close_price_at_D'] < df['BB_lower_at_D'],
+             df['close_price_at_D'] > df['BB_upper_at_D']],
+            ['Below_Lower', 'Above_Upper'],
+            default='Inside'
+        )
 
-        df['D_hour_bin'] = df['pattern_end_time'].dt.hour.apply(self.hour_bin)
+        # Temporal features
+        df['D_hour_bin'] = df['pattern_end_time'].dt.hour.map(self.hour_bin)
         df['D_day_of_week'] = df['pattern_end_time'].dt.dayofweek
 
-        df['type_vs_regime'] = df['pattern_type'] + '_' + np.where(df['SP500_diff'] > 0, 'Up', 'Down')
+        # Type vs regime
+        df['type_vs_regime'] = (
+                df['pattern_type'] + '_' +
+                np.where(df['SP500_diff'] > 0, 'Up', 'Down')
+        )
 
-        return df
+        # Assign back and return
+        self.pattern_df = df
+        return self.pattern_df
+
 
     def extract_pattern_info(self, pattern: XABCDPatternFound) -> dict:
         try:
