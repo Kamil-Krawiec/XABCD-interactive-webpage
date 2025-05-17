@@ -16,3 +16,5 @@ requests==2.31.0
 
 # Data Classes and Utilities
 dataclasses==0.6
+
+joblib
