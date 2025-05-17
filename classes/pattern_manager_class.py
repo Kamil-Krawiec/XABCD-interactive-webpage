@@ -2,16 +2,18 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pandas as pd
+import numpy as np
+from classes import TechnicalIndicators
 from classes import ValidPatterns, XABCDPatternFound
 from classes.request_manager_class import RequestManager
 from functions import calculate_harmonic_ratios, calculate_error
-from classes import TechnicalIndicators
 
 
 class PatternManager:
 
     def __init__(self, ohlc: pd.DataFrame, extremes: pd.DataFrame, err_thresh: float = 0.2,
-                 api_key_alpha_vantage: str = None, symbol='BTCUSDT', interval='1d'):
+                 api_key_alpha_vantage: str = None, symbol='BTCUSDT', interval='1d',
+                 cache_path="cache/sp500_cache.csv"):
         self.ohlc = ohlc
         self.extremes = extremes
         self.err_thresh = err_thresh
@@ -21,7 +23,7 @@ class PatternManager:
         self.pattern_df = None
         self.pattern_list = []
         self.ALL_PATTERNS = ValidPatterns.ALL_PATTERNS
-        self.request_extractor = RequestManager(api_key_alpha_vantage)
+        self.request_extractor = RequestManager(api_key_alpha_vantage, cache_path)
         self.tech_indicators = TechnicalIndicators(ohlc)
 
     def find_xabcd_patterns(self):
@@ -176,22 +178,77 @@ class PatternManager:
             plt.show()
 
     def patterns_to_dataframe(self) -> pd.DataFrame:
-
         if self.pattern_list is None:
             raise ValueError("No patterns found. Run find_xabcd_patterns() first.")
 
-        pattern_dicts = []
-
-        # Loop through each pattern and extract the information using the helper function
-        for pattern in self.pattern_list:
-            pattern_info = self.extract_pattern_info(pattern)
-            pattern_dicts.append(pattern_info)
-
-        # Convert the list of pattern dictionaries into a DataFrame
+        pattern_dicts = [self.extract_pattern_info(p) for p in self.pattern_list]
         self.pattern_df = pd.DataFrame(pattern_dicts)
         self.pattern_df['symbol'] = self.symbol
         self.pattern_df['interval'] = self.interval
+
+        self.engineer_features()
         return self.pattern_df
+
+    @staticmethod
+    def hour_bin(hour: int) -> str:
+        if hour < 6: return '0-5'
+        if hour < 12: return '6-11'
+        if hour < 18: return '12-17'
+        return '18-23'
+
+    def engineer_features(self) -> pd.DataFrame:
+        """
+        Populate self.pattern_df with engineered features in place.
+        """
+        df = self.pattern_df
+
+        # SP500 features
+        df['SP500_at_X'] = df['X_time'].apply(
+            lambda t: self.request_extractor.get_SP500_index_at_time('SPY', t)
+        )
+        df['SP500_at_D'] = df['pattern_end_time'].apply(
+            lambda t: self.request_extractor.get_SP500_index_at_time('SPY', t)
+        )
+        df['SP500_diff'] = df['SP500_at_D'] - df['SP500_at_X']
+
+        # Body and return
+        df['D_body'] = df['close_price_at_D'] - df['open_price_at_D']
+        df['D_return'] = df['D_body'] / df['open_price_at_D']
+        df['D_body_dir'] = np.where(df['D_body'] > 0, 'Up', 'Down')
+
+        # Volume spike
+        df['D_vol_spike'] = (
+                df['volume_at_D'] > 1.5 * df['Volume_MA_20_at_D']
+        ).astype(int)
+
+        # Quantile bins for ratios and durations
+        for col in ['ratio_AB_XA', 'ratio_BC_AB', 'ratio_CD_BC', 'ratio_AD_XA']:
+            df[f'{col}_bin'] = pd.qcut(df[col], q=4, labels=False, duplicates='drop')
+        for col in ['pattern_duration', 'duration_XA', 'duration_AB', 'duration_BC', 'duration_CD']:
+            df[f'{col}_bin'] = pd.qcut(df[col], q=4, labels=False, duplicates='drop')
+
+        # Bollinger Band region
+        df['BB_region_at_D'] = np.select(
+            [df['close_price_at_D'] < df['BB_lower_at_D'],
+             df['close_price_at_D'] > df['BB_upper_at_D']],
+            ['Below_Lower', 'Above_Upper'],
+            default='Inside'
+        )
+
+        # Temporal features
+        df['D_hour_bin'] = df['pattern_end_time'].dt.hour.map(self.hour_bin)
+        df['D_day_of_week'] = df['pattern_end_time'].dt.dayofweek
+
+        # Type vs regime
+        df['type_vs_regime'] = (
+                df['pattern_type'] + '_' +
+                np.where(df['SP500_diff'] > 0, 'Up', 'Down')
+        )
+
+        # Assign back and return
+        self.pattern_df = df
+        return self.pattern_df
+
 
     def extract_pattern_info(self, pattern: XABCDPatternFound) -> dict:
         try:

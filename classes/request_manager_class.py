@@ -12,123 +12,103 @@ class RequestManager:
         self.cache_path = cache_path  # Local storage path for the S&P 500 data
 
     def fetch_market_index_SP500(self, symbol: str):
-        # If symbol data is in the in-memory cache, return it
-        if symbol in self.data_cache:
-            return self.data_cache[symbol]
+        """
+        Return a DataFrame of daily bars for `symbol` (e.g. 'SPY').
 
-        # Get today's date
-        today = date.today()
+        Logic
+        -----
+        1. Try to read the CSV at self.cache_path.
+           • If successful, store in `self.data_cache` and return.
+           • If the file is missing or cannot be parsed, go to step 2.
+        2. Call Alpha Vantage, build a DataFrame, **overwrite** the CSV,
+           cache it in memory, and return.
+        """
 
-        # Set last trading day to one day before today
-        last_trading_day = today - timedelta(days=1)
-
-        # Check if data exists locally
+        # ── 1. attempt to use local cache ────────────────────────────────────
         if os.path.exists(self.cache_path):
-            print(f"Loading data from local storage: {self.cache_path}")
-            df = pd.read_csv(self.cache_path, index_col=0, parse_dates=True)
-            df.index = df.index.date  # Convert index to date format
-
-            # Get the last date in the CSV
-            last_cached_date = df.index[-1]
-
-            if last_cached_date >= last_trading_day:
-                print(f"Data is up to date for {last_trading_day}. Using local cache.")
-                self.data_cache[symbol] = df
-                return df
-            else:
-                print(f"Data is outdated. Last available date: {last_cached_date}. Fetching new data from API...")
-        else:
-            print("No local data is available. Fetching data from API...")
-
-        # Fetch data from the API
-        try:
-            response = requests.get(
-                f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={self.api_key}"
-            )
-            response.raise_for_status()  # Raise an exception for non-200 responses
-
-            data = response.json()
-            if 'Time Series (Daily)' in data:
-                # Convert the data to a pandas DataFrame
-                df = pd.DataFrame.from_dict(data['Time Series (Daily)'], orient='index', dtype=float)
-
-                # Convert index to datetime, then extract only the date
-                df.index = pd.to_datetime(df.index).date
-
-                # Sort by date
+            try:
+                df = pd.read_csv(self.cache_path, index_col=0, parse_dates=[0])
                 df.sort_index(inplace=True)
-
-                # Store the fetched data in cache
                 self.data_cache[symbol] = df
-
-                # Save the DataFrame to local storage for future use
-                df.to_csv(self.cache_path)
-                print(f"Data saved to local storage: {self.cache_path}")
-
                 return df
-            else:
-                print("Error: No 'Time Series (Daily)' data found in response.")
+            except Exception as exc:
+                print(f"[Cache] Could not read cache ({exc}); fetching fresh data.")
+
+        # ── 2. fetch full history from Alpha Vantage ─────────────────────────
+        url = (
+            "https://www.alphavantage.co/query"
+            f"?function=TIME_SERIES_DAILY&symbol={symbol}"
+            f"&outputsize=full&apikey={self.api_key}"
+        )
+        try:
+            r = requests.get(url, timeout=15)
+            r.raise_for_status()
+            payload = r.json()
+
+            ts_key = "Time Series (Daily)"
+            if ts_key not in payload:
+                print("[Alpha Vantage] No 'Time Series (Daily)' key in response.")
                 return None
-        except requests.RequestException as e:
-            print(f"Error fetching market index data: {e}")
-            # If there's an error fetching new data and local data exists, load from local storage
-            if os.path.exists(self.cache_path):
-                print(f"Falling back to local storage: {self.cache_path}")
-                df = pd.read_csv(self.cache_path, index_col=0, parse_dates=True)
-                df.index = df.index.date  # Convert index to date format
-                self.data_cache[symbol] = df
-                return df
 
+            df = pd.DataFrame.from_dict(payload[ts_key], orient="index").astype(float)
+            df.index = pd.to_datetime(df.index)
+            df.sort_index(inplace=True)
+
+            # overwrite / create cache file
+            df.to_csv(self.cache_path)
+            self.data_cache[symbol] = df
+            return df
+
+        except requests.RequestException as err:
+            print(f"[Alpha Vantage] Request failed ({err}). No data available.")
             return None
+
+    from datetime import timedelta
+    import pandas as pd
 
     def get_SP500_index_at_time(self, symbol: str, timestamp: pd.Timestamp):
         """
-        Retrieves the S&P 500 index value at a specific timestamp.
-        If the exact date is not available, it attempts to retrieve the value
-        from previous trading days.
+        Return the S&P 500 (or any market-index ETF) close price nearest to `timestamp`.
 
-        Args:
-        - symbol: The symbol for the S&P 500 index (e.g., 'SPY').
-        - timestamp: The timestamp for which the index value is requested.
+        • First look for the exact trading day.
+        • If the market was closed, step backwards until the most recent
+          available bar.
+        • Falls back to `None` (and a message) when no data exist before
+          the requested date.
 
-        Returns:
-        - The S&P 500 index value or None if not available.
+        Parameters
+        ----------
+        symbol : str
+            Ticker, e.g. "SPY".
+        timestamp : pd.Timestamp
+            Datetime you want the index value for (timezone-naïve OK).
+
+        Returns
+        -------
+        float | None
         """
-        # Fetch the market index data for the S&P 500
         df = self.fetch_market_index_SP500(symbol)
-
-        if df is not None:
-            # Extract the target date
-            target_date = timestamp.date()
-            # Adjusted to use datetime.timedelta
-            prev_day = target_date - timedelta(days=1)
-            prev_prev_day = target_date - timedelta(days=2)
-
-            # Ensure the index is in datetime.date format
-            if not isinstance(df.index, pd.Index):
-                df.index = pd.to_datetime(df.index).date
-
-            # Check if the target date exists in the index
-            if target_date in df.index:
-                # Return the value in the '4. close' column for the matched date
-                return df.loc[target_date, '4. close']
-            elif prev_day in df.index:
-                return df.loc[prev_day, '4. close']
-            elif prev_prev_day in df.index:
-                return df.loc[prev_prev_day, '4. close']
-            else:
-                # Find the last available date before the target date
-                available_dates = df.index[df.index < target_date]
-                if len(available_dates) > 0:
-                    last_available_date = available_dates[-1]
-                    return df.loc[last_available_date, '4. close']
-                else:
-                    print(f"No data found for {target_date} or previous dates.")
-                    return None
-        else:
-            # Handle the case where no data is fetched
-            print(f"No data available for symbol: {symbol}")
+        if df is None or df.empty:
+            print(f"[{symbol}] no data available.")
             return None
+
+        # Ensure a proper DatetimeIndex
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+
+        # Normalise both sides to midnight → compare dates not intraday times
+        target = pd.to_datetime(timestamp).normalize()
+
+        if target in df.index:
+            return df.at[target, "4. close"]
+
+        # Step back until we hit the first date that exists in the DataFrame
+        earlier = df.index[df.index < target]
+        if len(earlier):
+            return df.loc[earlier[-1], "4. close"]
+
+        print(f"[{symbol}] no historical bars prior to {target.date()}.")
+        return None
 
     def get_fear_greed_index_at_time(self, timestamp: pd.Timestamp):
         """
