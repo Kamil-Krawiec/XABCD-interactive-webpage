@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 import numpy as np
 from functions import perform_trade_analysis
-from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS, MAX_REQUESTS_DAYS,
+from config import (DEFAULT_THRESHOLDS, DEFAULT_DELTAS, INTERESTING_COLUMNS, INTERVAL_PARAMETERS,
                     TOP_40_FEATURES, ALL_FEATURES)
 from classes import PatternManager
 from functions import get_historical_data
@@ -16,7 +16,9 @@ from functions import plot_xabcd_pattern, plot_xabcd_patterns_with_sl_tp
 
 # Load API key and models
 ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
-clf = joblib.load("./data/clf_top40.pkl")
+clf_top40 = joblib.load("./data/clf_top40.pkl")
+clf_all = joblib.load("./data/clf_topAll.pkl")
+clf_top60 = joblib.load("./data/clf_top60.pkl")
 reg_xgb = joblib.load("./data/reg_xgb_all.pkl")
 scaler = joblib.load("./data/scaler_all.pkl")
 
@@ -216,7 +218,7 @@ def render_prediction_section(filtered_df: pd.DataFrame):
 
     # 2) Build descriptive labels
     df = filtered_df.reset_index(drop=True)
-    options = [f"{i + 1}: {row['pattern_name']} @ {row['X_time']}" for i, row in df.iterrows()]
+    options = [f"{i + 1}: {row['pattern_name']} @ {row['X_time']} - {row.Y}-{row.exit_reason}" for i, row in df.iterrows()]
 
     # 3) User selects pattern
     choice = st.selectbox("Select Pattern to Predict", options, key="pattern_pred_select")
@@ -227,17 +229,57 @@ def render_prediction_section(filtered_df: pd.DataFrame):
 
     # 4) Feature engineering
     df_dummy = pd.get_dummies(row, drop_first=True)
-    Xc = df_dummy.reindex(columns=clf.get_booster().feature_names, fill_value=0)
+    Xc_top40 = df_dummy.reindex(columns=clf_top40.get_booster().feature_names, fill_value=0)
+    Xc_top60 = df_dummy.reindex(columns=clf_top60.get_booster().feature_names, fill_value=0)
+    Xc_all  = df_dummy.reindex(columns=clf_all.get_booster().feature_names, fill_value=0)
     Xr = df_dummy.reindex(columns=ALL_FEATURES, fill_value=0)
 
     # 5) Make predictions
-    prob_success = clf.predict_proba(Xc)[0, 1] * 100
+    prob_success_top40 = clf_top40.predict_proba(Xc_top40)[0, 1] * 100
+    prob_success_top60 = clf_top60.predict_proba(Xc_top60)[0, 1] * 100
+    prob_success_all = clf_all.predict_proba(Xc_all)[0, 1] * 100
+
     profit_xgb = reg_xgb.predict(scaler.transform(Xr))[0] * 100
 
-    # 6) Display metrics side by side
-    c1, c2 = st.columns(2)
-    c1.metric("🏆 Success Probability", f"{prob_success:.2f}%")
-    c2.metric("💰 Predicted Profit", f"{profit_xgb:.2f}%")
+    # 6) Display metrics and recommendation side by side
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("🏆 Success Prob. Top40", f"{prob_success_top40:.2f}%")
+    c2.metric("🏆 Success Prob. Top60", f"{prob_success_top60:.2f}%")
+    c3.metric("🏆 Success Prob. All-Features", f"{prob_success_all:.2f}%")
+    c4.metric("💰 Predicted Profit", f"{profit_xgb:.2f}%")
+
+    # Determine best model and build recommendation
+    probs = {
+        "Top40": prob_success_top40,
+        "Top60": prob_success_top60,
+        "All-Features": prob_success_all
+    }
+    best_model, best_prob = max(probs.items(), key=lambda x: x[1])
+
+    # Customize your thresholds to taste
+    HIGH_CONFIDENCE = 50.0  # %
+    MIN_PROFIT = 0.0  # %
+
+    if best_prob < 50:
+        recommendation = (
+            f"⚠️ Low confidence ({best_model} @ {best_prob:.1f}%) "
+            "or non-positive profit forecast – consider skipping this setup."
+        )
+    elif best_prob >= HIGH_CONFIDENCE and profit_xgb >= MIN_PROFIT:
+        recommendation = (
+            f"✅ Strong signal from {best_model} model ({best_prob:.1f}% success) "
+            f"and healthy profit expectation ({profit_xgb:.2f}%) – "
+            "you may consider taking this trade with appropriate sizing."
+        )
+    else:
+        recommendation = (
+            f"ℹ️ Moderate outlook: {best_model} at {best_prob:.1f}% success, "
+            f"{profit_xgb:.2f}% profit projected – "
+            "you might wait for additional confirmation or scale in cautiously."
+        )
+
+    # 5th column: show recommendation
+    c5.markdown(f"### 💡 Recommendation\n\n{recommendation}")
 
     # 7) Plot prediction chart with SL/TP overlay
     with st.expander("Show Prediction Chart", expanded=True):
@@ -266,6 +308,7 @@ def render_prediction_section(filtered_df: pd.DataFrame):
             )
             st.pyplot(fig)
 
+
 def main():
     st.set_page_config(page_title="Cryptocurrency XABCD Pattern Analyzer", layout="wide")
     st.title("Cryptocurrency XABCD Pattern Analyzer")
@@ -278,26 +321,28 @@ def main():
     # --- Sidebar config ---
     st.sidebar.header("Configuration")
     symbols = st.sidebar.multiselect(
-        "Symbols", ["BTCUSDT","ETHUSDT","BNBUSDT","ETHBTC","SOLUSDT"], default=["BTCUSDT"]
+        "Symbols", ["BTCUSDT", "ETHUSDT", "ETHBTC", "SOLUSDT"], default=["BTCUSDT"]
     )
     intervals = st.sidebar.multiselect(
-        "Intervals", ["1wk","1d","1h","30m"], default=["1d"]
+        "Intervals", ["1w", "1d", "1h", "30m"], default=["1d"]
     )
 
     thresholds, deltas, start_dates = {}, {}, {}
     for iv in intervals:
         st.sidebar.markdown(f"### {iv} Settings")
-        max_days = MAX_REQUESTS_DAYS.get(iv)
-        earliest = datetime.utcnow() - timedelta(days=(max_days - 1) if max_days else 3650)
+        earliest = datetime.utcnow() - timedelta(7*365)
         date_input = st.sidebar.date_input(
-            "Start Date", value=earliest.date(), min_value=earliest.date(), max_value=datetime.utcnow().date(), key=f"start_{iv}"
+            "Start Date", value=earliest.date(), min_value=earliest.date(), max_value=datetime.utcnow().date(),
+            key=f"start_{iv}"
         )
         start_dates[iv] = date_input.strftime('%Y-%m-%d')
         thresholds[iv] = st.sidebar.number_input(
-            "Threshold-Minimum relative price change (decimal) to identify an extreme high or low (e.g., 0.05 = 5%). Higher values filter out smaller swings. ", 0.0, 1.0, DEFAULT_THRESHOLDS.get(iv, 0.04), 0.001, key=f"th_{iv}"
+            "Threshold-Minimum relative price change (decimal) to identify an extreme high or low (e.g., 0.05 = 5%). Higher values filter out smaller swings. ",
+            0.0, 1.0, DEFAULT_THRESHOLDS.get(iv, 0.04), 0.001, key=f"th_{iv}"
         )
         deltas[iv] = st.sidebar.number_input(
-            "Delta-Maximum allowed deviation (decimal) from ideal Fibonacci ratios when validating XABCD pattern legs. Smaller values enforce stricter pattern fit.", 0.0, 1.0, DEFAULT_DELTAS.get(iv, 0.1), 0.001, key=f"dl_{iv}"
+            "Delta-Maximum allowed deviation (decimal) from ideal Fibonacci ratios when validating XABCD pattern legs. Smaller values enforce stricter pattern fit.",
+            0.0, 1.0, DEFAULT_DELTAS.get(iv, 0.1), 0.001, key=f"dl_{iv}"
         )
 
     # --- Fetch & analyze patterns ---
@@ -365,6 +410,7 @@ def main():
                 f"{i + 1}: {r.symbol}@{r.D_time} ({r.profit:.2f}%)"
                 for i, r in sltp.reset_index().iterrows()
             ]
+
             choice = st.selectbox("Select Trade", opts, key="trade_to_plot")
             idx = int(choice.split(":")[0]) - 1
             trade = sltp.reset_index().iloc[idx]
@@ -373,7 +419,7 @@ def main():
             ohlc['open_time'] = pd.to_datetime(ohlc['open_time'])
             ohlc.set_index('open_time', inplace=True)
             left, right = 2, INTERVAL_PARAMETERS[trade.interval][5] + 1
-            fig = plot_xabcd_patterns_with_sl_tp(trade, ohlc, left, right)
+            fig = plot_xabcd_patterns_with_sl_tp(pattern=trade, ohlc=ohlc, candles_left=left, candles_right=right)
             st.pyplot(fig)
 
         # --- Pattern Prediction (always shown too) ---
