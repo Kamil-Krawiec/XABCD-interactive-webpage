@@ -324,7 +324,7 @@ def main():
         "Symbols", ["BTCUSDT", "ETHUSDT", "ETHBTC", "SOLUSDT"], default=["BTCUSDT"]
     )
     intervals = st.sidebar.multiselect(
-        "Intervals", ["1w", "1d", "1h", "30m"], default=["1d"]
+        "Intervals", ["1w", "1d", "4h","1h", "30m","15m"], default=["1d"]
     )
 
     thresholds, deltas, start_dates = {}, {}, {}
