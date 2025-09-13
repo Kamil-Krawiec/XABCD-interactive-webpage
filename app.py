@@ -337,11 +337,11 @@ def main():
         )
         start_dates[iv] = date_input.strftime('%Y-%m-%d')
         thresholds[iv] = st.sidebar.number_input(
-            "Threshold-Minimum relative price change (decimal) to identify an extreme high or low (e.g., 0.05 = 5%). Higher values filter out smaller swings. ",
+            "DELTA-Minimum relative price change (decimal) to identify an extreme high or low (e.g., 0.05 = 5%). Higher values filter out smaller swings. ",
             0.0, 1.0, DEFAULT_THRESHOLDS.get(iv, 0.04), 0.001, key=f"th_{iv}"
         )
         deltas[iv] = st.sidebar.number_input(
-            "Delta-Maximum allowed deviation (decimal) from ideal Fibonacci ratios when validating XABCD pattern legs. Smaller values enforce stricter pattern fit.",
+            "Threshold-Maximum allowed deviation (decimal) from ideal Fibonacci ratios when validating XABCD pattern legs. Smaller values enforce stricter pattern fit.",
             0.0, 1.0, DEFAULT_DELTAS.get(iv, 0.1), 0.001, key=f"dl_{iv}"
         )
 
